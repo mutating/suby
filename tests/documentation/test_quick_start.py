@@ -25,7 +25,8 @@ def test_run_hello_world_not_windows():
 
 @pytest.mark.skipif(platform.system() != 'Windows', reason='Windows and not windows have different rules of escaping characters.')
 def test_run_hello_world_windows():
-    from mslex import quote
+    from mslex import quote  # type: ignore[import-not-found]
+
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
