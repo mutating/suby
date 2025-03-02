@@ -537,5 +537,6 @@ def test_wrong_command(command, exception_message):
 def test_envs_for_subprocess_are_same_as_parent():
     print('env', environ)
     print('process_env', json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout))
+    print('diff', set(environ.items()) ^ set(json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout).items()))
 
     assert json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout) == environ
