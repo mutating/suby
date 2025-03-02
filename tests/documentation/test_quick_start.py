@@ -32,11 +32,12 @@ def test_run_hello_world_windows():
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
+    python_path = os.path.normcase(sys.executable)
     print('result', quote(f'{python_path} -c "print(\"Hello, world!\n\")"'))
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         #result = suby('python -c "print^(\'hello, world^!\'^)"', catch_exceptions=True)
-        python_path = os.path.normcase(sys.executable)
+
 
         result = suby(quote(f'{python_path} -c "print(\"Hello, world!\n\")"'), catch_exceptions=True)
         print(result)
