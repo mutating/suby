@@ -10,7 +10,7 @@ authors = [
 ]
 description = 'Slightly simplified subprocesses'
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 dependencies = [
     'emptylog>=0.0.8',
     'cantok>=0.0.30',
