@@ -1,3 +1,4 @@
+import os, sys
 from io import StringIO
 import platform
 from contextlib import redirect_stdout, redirect_stderr
@@ -32,7 +33,8 @@ def test_run_hello_world_windows():
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         #result = suby('python -c "print^(\'hello, world^!\'^)"', catch_exceptions=True)
-        result = suby(quote('python -c "print(\"Hello, world!\n\")"'), catch_exceptions=True)
+        python_path = os.path.normcase(sys.executable)
+        result = suby(quote(f'{python_path} -c "print(\"Hello, world!\n\")"'), catch_exceptions=True)
         print(result)
 
     print(result)
