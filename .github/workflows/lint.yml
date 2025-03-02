@@ -37,8 +37,8 @@ jobs:
 
     - name: Run ruff
       shell: bash
-      run: ruff suby
+      run: ruff check suby
 
     - name: Run ruff for tests
       shell: bash
-      run: ruff tests
+      run: ruff check tests
