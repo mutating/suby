@@ -38,7 +38,7 @@ def test_run_hello_world_windows():
     print('result', quote(f'{python_path} -c "print(\"Hello, world!\n\")"'))
     print('splitted result', split(quote(f'{python_path} -c "print(\"Hello, world!\n\")"')))
     print('splitted without normcasing result', split(quote(f'{sys.executable} -c "print(\"Hello, world!\n\")"')))
-    print('splitted in a good way', split(quote(f'python -c {script_string}')))
+    print('splitted in a good way', split(quote(f'python -c {script_string}'), like_cmd=False))
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         #result = suby('python -c "print^(\'hello, world^!\'^)"', catch_exceptions=True)
