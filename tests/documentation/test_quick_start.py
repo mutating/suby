@@ -27,13 +27,14 @@ def test_run_hello_world_not_windows():
 
 @pytest.mark.skipif(platform.system() != 'Windows', reason='Windows and not windows have different rules of escaping characters.')
 def test_run_hello_world_windows():
-    from mslex import quote  # type: ignore[import-not-found]
+    from mslex import quote, split  # type: ignore[import-not-found]
 
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
     python_path = os.path.normcase(sys.executable)
     print('result', quote(f'{python_path} -c "print(\"Hello, world!\n\")"'))
+    print('splitted result', split(quote(f'{python_path} -c "print(\"Hello, world!\n\")"')))
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         #result = suby('python -c "print^(\'hello, world^!\'^)"', catch_exceptions=True)
