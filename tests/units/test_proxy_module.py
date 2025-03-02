@@ -535,12 +535,10 @@ def test_wrong_command(command, exception_message):
 
 
 def test_envs_for_subprocess_are_same_as_parent():
-    print('env', environ)
-    print('process_env', json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout))
-    process_env = json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
-    print('diff', set(environ.items()) ^ set(process_env.items()))
+    subprocess_env = json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
 
-    print('certain diff items from env:', environ.get('COLUMNS'), environ.get('LINES'))
-    print('certain diff items from process_env:', process_env.get('COLUMNS'), process_env.get('LINES'))
+    # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
+    subprocess_env.pop('LINES', None)
+    subprocess_env.pop('COLUMNS', None)
 
-    assert json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout) == environ
+    assert subprocess_env == environ
