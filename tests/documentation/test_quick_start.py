@@ -35,6 +35,7 @@ def test_run_hello_world_windows():
     python_path = os.path.normcase(sys.executable)
     print('result', quote(f'{python_path} -c "print(\"Hello, world!\n\")"'))
     print('splitted result', split(quote(f'{python_path} -c "print(\"Hello, world!\n\")"')))
+    print('splitted without normcasing result', split(quote(f'{sys.executable} -c "print(\"Hello, world!\n\")"')))
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         #result = suby('python -c "print^(\'hello, world^!\'^)"', catch_exceptions=True)
