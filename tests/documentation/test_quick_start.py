@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 from io import StringIO
 import platform
 from contextlib import redirect_stdout, redirect_stderr
