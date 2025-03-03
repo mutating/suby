@@ -47,7 +47,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
 
         logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
-        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
+        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True, shell = True) as process:
             stderr_reading_thread = self.run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
             if not isinstance(token, DefaultToken):
                 killing_thread = self.run_killing_thread(process, token, result)
