@@ -9,10 +9,7 @@ from types import ModuleType
 from emptylog import EmptyLogger, LoggerProtocol
 from cantok import AbstractToken, TimeoutToken, DefaultToken, CancellationError
 
-try:
-    from oslex import split as shlex_split  # type: ignore[import, unused-ignore]
-except ImportError:  # pragma: no cover
-    from shlex import split as shlex_split  # pragma: no cover
+from shlex import split as shlex_split
 
 from suby.errors import RunningCommandError, WrongCommandError
 from suby.subprocess_result import SubprocessResult
