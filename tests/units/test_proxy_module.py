@@ -487,6 +487,9 @@ def test_pass_wrong_positional_argument(arguments, exception_message):
     ]
 )
 def test_use_path_object_as_first_positional_argument(command):
+    from shlex import split
+
+    print('splitted_comand:', [split(x) for x in command])
     result = suby(*command)
 
     assert result.stdout == 'kek\n'
