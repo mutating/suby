@@ -520,7 +520,6 @@ def test_multiple_args_without_split(command):
     assert result.returncode == 0
 
 
-@pytest.mark.skipif(platform.system() == 'Windows', reason='There is no errors like this in mslex.')
 @pytest.mark.parametrize(
     ['command', 'exception_message'],
     [
