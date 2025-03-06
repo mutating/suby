@@ -1,6 +1,7 @@
 import re
 import sys
 import json
+import platform
 from os import environ
 from time import perf_counter
 from io import StringIO
@@ -543,3 +544,9 @@ def test_envs_for_subprocess_are_same_as_parent():
     subprocess_env.pop('COLUMNS', None)
 
     assert subprocess_env == environ
+
+
+@pytest.mark.skipif(platform.system() != 'Windows', reason='Windows arguments should be splitted.')
+def test_you_cant_use_flag_split_equal_true_on_windows():
+    with pytest.raises(OSError, match=full_match('Windows arguments should be splitted.')):
+        suby('python -c "print(\'hello, world!\')"', split=True)
