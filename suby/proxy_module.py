@@ -112,7 +112,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
     def split_argument(argument: str) -> List[str]:
         # https://stackoverflow.com/a/35900070/14522393
         if platform.system() == 'Windows':
-            return [argument]
+            return [argument]  # pragma: no cover
         return shlex_split(argument)
 
     def run_killing_thread(self, process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
