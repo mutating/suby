@@ -6,7 +6,6 @@ from time import perf_counter
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
-import platform
 
 import pytest
 import full_match
