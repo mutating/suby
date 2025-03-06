@@ -27,12 +27,15 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         stdout_callback: Callable[[str], Any] = stdout_with_flush,
         stderr_callback: Callable[[str], Any] = stderr_with_flush,
         timeout: Optional[Union[int, float]] = None,
-        split: bool = True,
+        split: bool = platform.system() == 'Windows',
         token: AbstractToken = DefaultToken(),
     ) -> SubprocessResult:
         """
         About reading from strout and stderr: https://stackoverflow.com/a/28319191/14522393
         """
+        if platform.system() == 'Windows' and not split:
+            raise OSError('Windows arguments should be splitted.')
+
         if timeout is not None and isinstance(token, DefaultToken):
             token = TimeoutToken(timeout)
         elif timeout is not None:
@@ -117,7 +120,6 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         # https://stackoverflow.com/a/35900070/14522393
         if platform.system() == 'Windows':
             return [argument]  # pragma: no cover
-        #return [argument]
         return shlex_split(argument)
 
     def run_killing_thread(self, process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
