@@ -1,4 +1,5 @@
 import sys
+import platform
 from time import sleep
 from threading import Thread
 from subprocess import Popen, PIPE
@@ -38,7 +39,6 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
             token += TimeoutToken(timeout)
 
         converted_arguments = self.convert_arguments(arguments, split)
-
         arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
         stdout_buffer: List[str] = []
@@ -47,7 +47,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
 
         logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
-        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True, shell = True) as process:
+        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
             stderr_reading_thread = self.run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
             if not isinstance(token, DefaultToken):
                 killing_thread = self.run_killing_thread(process, token, result)
@@ -87,8 +87,8 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
 
         return result
 
-    @staticmethod
-    def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> List[str]:
+    @classmethod
+    def convert_arguments(cls, arguments: Tuple[Union[str, Path], ...], split: bool) -> List[str]:
         converted_arguments = []
 
         for argument in arguments:
@@ -97,7 +97,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
             elif isinstance(argument, str):
                 if split:
                     try:
-                        for sub_argument in shlex_split(argument):
+                        for sub_argument in cls.split_argument(argument):
                             converted_arguments.append(sub_argument)
                     except Exception as e:  # pragma: no cover
                         raise WrongCommandError(f'The expression "{argument}" cannot be parsed.') from e  # pragma: no cover
@@ -107,6 +107,13 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
                 raise TypeError(f'Only strings and pathlib.Path objects can be positional arguments when calling the suby function. You passed "{argument}" ({type(argument).__name__}).')
 
         return converted_arguments
+
+    @staticmethod
+    def split_argument(argument: str) -> List[str]:
+        # https://stackoverflow.com/a/35900070/14522393
+        if platform.system() == 'Windows':
+            return [argument]
+        return shlex_split(argument)
 
     def run_killing_thread(self, process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
         thread = Thread(target=self.killing_loop, args=(process, token, result))
