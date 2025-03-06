@@ -34,7 +34,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         About reading from strout and stderr: https://stackoverflow.com/a/28319191/14522393
         """
         if platform.system() == 'Windows' and not split:
-            raise OSError('Windows arguments should be splitted.')
+            raise OSError('Windows arguments should be splitted.')  # pragma: no cover
 
         if timeout is not None and isinstance(token, DefaultToken):
             token = TimeoutToken(timeout)
