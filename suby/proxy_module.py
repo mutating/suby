@@ -3,7 +3,7 @@ import platform
 from time import sleep
 from threading import Thread
 from subprocess import Popen, PIPE
-from typing import List, Tuple, Callable, Union, Optional, Any
+from typing import List, Dict, Tuple, Callable, Union, Optional, Any
 from pathlib import Path
 from types import ModuleType
 
@@ -47,7 +47,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
 
         logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
         if platform.system() == 'Windows':
-            addictional_keys = {'shell': True}
+            addictional_keys: Dict[str, bool] = {'shell': True}
         else:
             addictional_keys = {}
 
@@ -117,7 +117,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         # https://stackoverflow.com/a/35900070/14522393
         if platform.system() == 'Windows':
             return [argument]  # pragma: no cover
-        return [argument]
+        #return [argument]
         return shlex_split(argument)
 
     def run_killing_thread(self, process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
