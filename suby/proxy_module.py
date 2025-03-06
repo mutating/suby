@@ -39,7 +39,6 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
             token += TimeoutToken(timeout)
 
         converted_arguments = self.convert_arguments(arguments, split)
-        print(converted_arguments)
         arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
         stdout_buffer: List[str] = []
