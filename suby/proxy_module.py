@@ -3,7 +3,7 @@ import platform
 from time import sleep
 from threading import Thread
 from subprocess import Popen, PIPE
-from typing import List, Dict, Tuple, Callable, Union, Optional, Any
+from typing import List, Tuple, Callable, Union, Optional, Any
 from pathlib import Path
 from types import ModuleType
 
