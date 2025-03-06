@@ -1,11 +1,7 @@
-import os
-import sys
 from io import StringIO
-import platform
 from contextlib import redirect_stdout, redirect_stderr
 
 import suby
-import pytest
 
 
 def test_run_hello_world():
