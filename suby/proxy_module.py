@@ -39,6 +39,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
             token += TimeoutToken(timeout)
 
         converted_arguments = self.convert_arguments(arguments, split)
+        print(converted_arguments)
         arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
         stdout_buffer: List[str] = []
@@ -46,8 +47,12 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         result = SubprocessResult()
 
         logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
+        if platform.system() == 'Windows':
+            addictional_keys = {'shell': True}
+        else:
+            addictional_keys = {}
 
-        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
+        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True, **addictional_keys) as process:
             stderr_reading_thread = self.run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
             if not isinstance(token, DefaultToken):
                 killing_thread = self.run_killing_thread(process, token, result)
@@ -113,6 +118,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         # https://stackoverflow.com/a/35900070/14522393
         if platform.system() == 'Windows':
             return [argument]  # pragma: no cover
+        return [argument]
         return shlex_split(argument)
 
     def run_killing_thread(self, process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
