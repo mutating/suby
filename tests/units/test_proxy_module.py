@@ -523,6 +523,7 @@ def test_multiple_args_without_split(command):
     assert result.returncode == 0
 
 
+@pytest.mark.skipif(platform.system() == 'Windows', reason='On windows the split mode is default')
 @pytest.mark.parametrize(
     ['command', 'exception_message'],
     [
@@ -532,6 +533,20 @@ def test_multiple_args_without_split(command):
     ]
 )
 def test_wrong_command(command, exception_message):
+    with pytest.raises(WrongCommandError, match=full_match(exception_message)):
+        suby(*command)
+
+
+@pytest.mark.skipif(platform.system() != 'Windows', reason='On windows the split mode is default')
+@pytest.mark.parametrize(
+    ['command', 'exception_message'],
+    [
+        ((Path(sys.executable), '-c "'), 'The expression "-c "" cannot be parsed.'),
+        ((sys.executable, '-c "'), 'The expression "-c "" cannot be parsed.'),
+        (('python -c "',), 'The expression "python -c "" cannot be parsed.'),
+    ]
+)
+def test_wrong_command_windows(command, exception_message):
     with pytest.raises(WrongCommandError, match=full_match(exception_message)):
         suby(*command)
 

@@ -50,19 +50,28 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
 
         logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
-        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
-            stderr_reading_thread = self.run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
-            if not isinstance(token, DefaultToken):
-                killing_thread = self.run_killing_thread(process, token, result)
+        try:
+            with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
+                stderr_reading_thread = self.run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
+                if not isinstance(token, DefaultToken):
+                    killing_thread = self.run_killing_thread(process, token, result)
 
-            for line in process.stdout:  # type: ignore[union-attr]
-                stdout_buffer.append(line)
-                if not catch_output:
-                    stdout_callback(line)
+                for line in process.stdout:  # type: ignore[union-attr]
+                    stdout_buffer.append(line)
+                    if not catch_output:
+                        stdout_callback(line)
 
-            stderr_reading_thread.join()
-            if not isinstance(token, DefaultToken):
-                killing_thread.join()
+                stderr_reading_thread.join()
+                if not isinstance(token, DefaultToken):
+                    killing_thread.join()
+
+        except FileNotFoundError as e:
+            if not catch_exceptions:
+                message = f'Error when executing the command "{arguments_string_representation}".'
+                logger.error(message)
+                raise RunningCommandError(message, result) from e
+            return result
+
 
         self.fill_result(stdout_buffer, stderr_buffer, process.returncode, result)
 
