@@ -536,8 +536,20 @@ def test_wrong_command(command, exception_message):
         suby(*command)
 
 
+@pytest.mark.skipif(platform.system() == 'Windows', reason='On windows the split mode is default')
 def test_envs_for_subprocess_are_same_as_parent():
     subprocess_env = json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
+
+    # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
+    subprocess_env.pop('LINES', None)
+    subprocess_env.pop('COLUMNS', None)
+
+    assert subprocess_env == environ
+
+
+@pytest.mark.skipif(platform.system() != 'Windows', reason='On windows the split mode is default')
+def test_envs_for_subprocess_are_same_as_parent_windows():
+    subprocess_env = json.loads(suby('python', '-c', 'import os, json; print(json.dumps(dict(os.environ)))').stdout)
 
     # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
     subprocess_env.pop('LINES', None)
