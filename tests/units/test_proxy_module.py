@@ -523,7 +523,6 @@ def test_multiple_args_without_split(command):
     assert result.returncode == 0
 
 
-@pytest.mark.skipif(platform.system() == 'Windows', reason='On windows the split mode is default')
 @pytest.mark.parametrize(
     ['command', 'exception_message'],
     [
@@ -537,21 +536,6 @@ def test_wrong_command(command, exception_message):
         suby(*command)
 
 
-@pytest.mark.skipif(platform.system() != 'Windows', reason='On windows the split mode is default')
-@pytest.mark.parametrize(
-    ['command', 'exception_message'],
-    [
-        ((Path(sys.executable), '-c "'), 'The expression "-c "" cannot be parsed.'),
-        ((sys.executable, '-c "'), 'The expression "-c "" cannot be parsed.'),
-        (('python -c "',), 'The expression "python -c "" cannot be parsed.'),
-    ]
-)
-def test_wrong_command_windows(command, exception_message):
-    with pytest.raises(WrongCommandError, match=full_match(exception_message)):
-        suby(*command)
-
-
-@pytest.mark.skipif(platform.system() == 'Windows', reason='On windows the split mode is default')
 def test_envs_for_subprocess_are_same_as_parent():
     subprocess_env = json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
 
@@ -560,20 +544,3 @@ def test_envs_for_subprocess_are_same_as_parent():
     subprocess_env.pop('COLUMNS', None)
 
     assert subprocess_env == environ
-
-
-@pytest.mark.skipif(platform.system() != 'Windows', reason='On windows the split mode is default')
-def test_envs_for_subprocess_are_same_as_parent_windows():
-    subprocess_env = json.loads(suby('python', '-c', 'import os, json; print(json.dumps(dict(os.environ)))').stdout)
-
-    # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
-    subprocess_env.pop('LINES', None)
-    subprocess_env.pop('COLUMNS', None)
-
-    assert subprocess_env == environ
-
-
-@pytest.mark.skipif(platform.system() != 'Windows', reason='Windows arguments should be splitted.')
-def test_you_cant_use_flag_split_equal_true_on_windows():
-    with pytest.raises(OSError, match=full_match('Windows arguments should be splitted.')):
-        suby('python -c "print(\'hello, world!\')"', split=True)
