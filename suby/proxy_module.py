@@ -65,7 +65,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         except FileNotFoundError as e:  # pragma: no cover
             if not catch_exceptions:
                 message = f'Error when executing the command "{arguments_string_representation}".'
-                logger.error(message)
+                logger.exception(message)
                 raise RunningCommandError(message, result) from e
             return result
 
