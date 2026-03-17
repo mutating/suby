@@ -27,7 +27,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
         stdout_callback: Callable[[str], Any] = stdout_with_flush,
         stderr_callback: Callable[[str], Any] = stderr_with_flush,
         timeout: Optional[Union[int, float]] = None,
-        split: bool = platform.system() != 'Windows',
+        split: bool = True,
         token: AbstractToken = DefaultToken(),
     ) -> SubprocessResult:
         """
