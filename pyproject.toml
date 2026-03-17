@@ -46,5 +46,5 @@ paths_to_mutate="suby"
 runner="pytest"
 
 [project.urls]
-'Source' = 'https://github.com/pomponchik/suby'
-'Tracker' = 'https://github.com/pomponchik/suby/issues'
+'Source' = 'https://github.com/mutating/suby'
+'Tracker' = 'https://github.com/mutating/suby/issues'
