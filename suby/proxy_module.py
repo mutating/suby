@@ -62,7 +62,7 @@ class ProxyModule(sys.modules[__name__].__class__):  # type: ignore[misc]
                 if not isinstance(token, DefaultToken):
                     killing_thread.join()
 
-        except FileNotFoundError as e:
+        except FileNotFoundError as e:  # pragma: no cover
             if not catch_exceptions:
                 message = f'Error when executing the command "{arguments_string_representation}".'
                 logger.error(message)
