@@ -6,5 +6,6 @@ class RunningCommandError(Exception):
         self.result = subprocess_result
         super().__init__(message)
 
+
 class WrongCommandError(Exception):
-    pass
+    ...
