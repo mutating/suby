@@ -1,7 +1,6 @@
 import re
 import sys
 import json
-import platform
 from os import environ
 from time import perf_counter
 from io import StringIO
