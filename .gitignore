@@ -13,3 +13,5 @@ test.py
 .mutmut-cache
 .mypy_cache
 html
+CLAUDE.md
+.claude
