@@ -1,9 +1,10 @@
-from io import StringIO
 import platform
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+
+import pytest
 
 from suby import run
-import pytest
 
 
 @pytest.mark.skipif(platform.system() == 'Windows', reason='Windows and not windows have different rules of escaping characters.')

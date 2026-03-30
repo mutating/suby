@@ -1,18 +1,17 @@
 import platform
-from time import sleep
-from threading import Thread
-from subprocess import Popen, PIPE
-from typing import List, Tuple, Callable, Union, Optional, Any
 from pathlib import Path
-
-from emptylog import EmptyLogger, LoggerProtocol
-from cantok import AbstractToken, TimeoutToken, DefaultToken, CancellationError
-
 from shlex import split as shlex_split
+from subprocess import PIPE, Popen
+from threading import Thread
+from time import sleep
+from typing import Any, Callable, List, Optional, Tuple, Union
 
+from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
+from emptylog import EmptyLogger, LoggerProtocol
+
+from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import RunningCommandError, WrongCommandError
 from suby.subprocess_result import SubprocessResult
-from suby.callbacks import stdout_with_flush, stderr_with_flush
 
 
 def run(
@@ -81,11 +80,10 @@ def run(
                 message = f'Error when executing the command "{arguments_string_representation}".'
                 logger.error(message)
                 raise RunningCommandError(message, result)
+        elif result.killed_by_token:
+            logger.error(f'The execution of the "{arguments_string_representation}" command was canceled using a cancellation token.')
         else:
-            if result.killed_by_token:
-                logger.error(f'The execution of the "{arguments_string_representation}" command was canceled using a cancellation token.')
-            else:
-                logger.error(f'Error when executing the command "{arguments_string_representation}".')
+            logger.error(f'Error when executing the command "{arguments_string_representation}".')
 
     else:
         logger.info(f'The command "{arguments_string_representation}" has been successfully executed.')

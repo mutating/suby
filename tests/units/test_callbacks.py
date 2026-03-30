@@ -1,7 +1,7 @@
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
-from contextlib import redirect_stdout, redirect_stderr
 
-from suby.callbacks import stdout_with_flush, stderr_with_flush
+from suby.callbacks import stderr_with_flush, stdout_with_flush
 
 
 def test_output_to_stdout():
