@@ -18,7 +18,7 @@ What do you want to do: remove something, add it, or change it?
 
 ## Where?
 
-Specify which part of the documentation you want to make a change to? For example, the name of an existing documentation section or the line number in a file `README.md`.
+Specify which part of the documentation you want to make a change to. For example, the name of an existing documentation section or the line number in a file `README.md`.
 
 
 ## The essence
