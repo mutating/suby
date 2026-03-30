@@ -23,4 +23,4 @@ Specify which part of the documentation you want to make a change to. For exampl
 
 ## The essence
 
-Please describe the essence of the proposed change
+Please describe the essence of the proposed change.

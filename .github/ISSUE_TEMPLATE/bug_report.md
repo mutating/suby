@@ -21,7 +21,7 @@ def test_your_bug():
     ...
 ```
 
-Writing the test, please keep compatibility with the [`pytest`](https://docs.pytest.org/) framework.
+When writing the test, please ensure compatibility with the [`pytest`](https://docs.pytest.org/) framework.
 
 If for some reason you cannot describe the error in the test format, describe here the steps to reproduce it.
 

@@ -87,7 +87,7 @@ We can see that it returns an object of the `SubprocessResult` class. It contain
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call). Which one depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should cut the string you passed. The rules for this cutting are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses the [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as a standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should cut the string you passed. The rules for this cutting are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses the [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as a standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
 
 In most cases, you will not notice any differences in the parsing rules. For example, the following line:
 
@@ -98,7 +98,7 @@ python -c "print('hello, world!')"
 ... on Windows should be escaped like here:
 
 ```python
-run('python -c "print^(\'hello,world^!\'^)"')
+run('python -c "print^(\'hello, world^!\'^)"')
 ```
 
 ... and on other systems like here:
@@ -123,12 +123,12 @@ If for some reason you want to disable the automatic splitting of strings into p
 run('python', '-c', 'print(777)', split=False)
 ```
 
-Of course, in this case, you will have to cut the command by yourself.
+Of course, in this case, you will have to split the command yourself.
 
 
 ## Output
 
-By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. The reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created in the main process, so that `stdout` and `stderr` are read independently.
+By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created in the main process, so that `stdout` and `stderr` are read independently.
 
 You can override the output functions for `stdout` and `stderr`. To do this, you need to pass as arguments `stdout_callback` and `stderr_callback`, respectively, some functions that accept a string as an argument. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
@@ -150,7 +150,7 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 # There's nothing here.
 ```
 
-If you specify `catch_output=True`, and at the same time redefine your functions for output, your functions will not be called either. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can stop exactly the output, but it does not prevent the collection and buffering of the output.
+If you specify `catch_output=True`, and at the same time redefine your functions for output, your functions will not be called either. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of the output.
 
 
 ## Logging
@@ -173,7 +173,7 @@ run('python -c pass', logger=logging.getLogger('logger_name'))
 # > 2024-02-22 02:15:08,190 [INFO] The command "python -c pass" has been successfully executed.
 ```
 
-The message about the start of the command execution is always done with the `INFO` [level](https://docs.python.org/3.8/library/logging.html#logging-levels). If the command is completed successfully, the end message will also be with the `INFO` level. And if not - `ERROR`:
+The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3.8/library/logging.html#logging-levels). If the command is completed successfully, the end message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
 
 ```python
 run('python -c "raise ValueError"', logger=logging.getLogger('logger_name'), catch_exceptions=True, catch_output=True)
@@ -204,7 +204,7 @@ except RunningCommandError as e:
 
 2. If you passed a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token was canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of canceled token. [This part of the functionality](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it beforehand.
 
-3. You have set a [timeout](#timeouts) for the operation and it has expired.
+3. If you have set a [timeout](#timeouts) for the operation and it has expired.
 
 You can prevent `suby` from raising any exceptions. To do this, set the `catch_exceptions` parameter to `True`:
 
@@ -231,7 +231,7 @@ except TimeoutCancellationError as e:
 
 `suby` is fully compatible with the [cancellation token pattern](https://cantok.readthedocs.io/en/latest/the_pattern/) and supports any token objects from the [`cantok`](https://github.com/pomponchik/cantok) library.
 
-The essence of the pattern is that you can pass an object to `suby`, from which it can find out whether the operation still needs to be continued or not. If not, it kills the subprocess. This pattern can be especially useful in the case of commands that are executed for a long time or for an unpredictably long time. When the result becomes unnecessary, there is no point in sitting and waiting for the command to work out.
+The essence of the pattern is that you can pass an object to `suby`, from which it can find out whether the operation still needs to be continued or not. If not, it kills the subprocess. This pattern can be especially useful in the case of commands that are executed for a long time or for an unpredictably long time. When the result becomes unnecessary, there is no point in sitting and waiting for the command to complete.
 
 So, you can pass your cancellation tokens to `suby`. By default, canceling a token causes an exception to be raised:
 
@@ -252,7 +252,7 @@ print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exce
 # > SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-"Under the hood" a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
+"under the hood" a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
 
 ## Timeouts
 
