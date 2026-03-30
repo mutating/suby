@@ -2,7 +2,7 @@ from io import StringIO
 import platform
 from contextlib import redirect_stdout, redirect_stderr
 
-import suby
+from suby import run
 import pytest
 
 
@@ -12,7 +12,7 @@ def test_run_hello_world_not_for_windows():
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby('python -c "print(\'hello, world!\')"')
+        result = run('python -c "print(\'hello, world!\')"')
 
     assert stderr_buffer.getvalue() == ''
     assert stdout_buffer.getvalue() == 'hello, world!\n'
@@ -30,7 +30,7 @@ def test_run_hello_world_windows():
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby('python', '-c', 'print("hello, world!")')
+        result = run('python', '-c', 'print("hello, world!")')
 
     assert stderr_buffer.getvalue() == ''
     assert stdout_buffer.getvalue() == 'hello, world!\n'

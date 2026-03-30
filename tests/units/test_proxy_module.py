@@ -12,8 +12,7 @@ import full_match
 from cantok import TimeoutCancellationError, ConditionCancellationError, ConditionToken, SimpleToken
 from emptylog import MemoryLogger
 
-import suby
-from suby import RunningCommandError, WrongCommandError
+from suby import run, RunningCommandError, WrongCommandError
 
 
 @pytest.mark.parametrize(
@@ -24,7 +23,7 @@ from suby import RunningCommandError, WrongCommandError
     ]
 )
 def test_normal_way(command):
-    result = suby(*command)
+    result = run(*command)
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
@@ -39,7 +38,7 @@ def test_normal_way(command):
     ]
 )
 def test_normal_way_with_simple_token(command):
-    result = suby(*command, token=SimpleToken())
+    result = run(*command, token=SimpleToken())
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
@@ -54,7 +53,7 @@ def test_normal_way_with_simple_token(command):
     ]
 )
 def test_stderr_catching(command):
-    result = suby(*command)
+    result = run(*command)
 
     assert result.stdout == ''
     assert result.stderr == 'kek'
@@ -69,7 +68,7 @@ def test_stderr_catching(command):
     ]
 )
 def test_catch_exception(command):
-    result = suby(*command, catch_exceptions=True)
+    result = run(*command, catch_exceptions=True)
 
     assert 'ValueError' in result.stderr
     assert result.returncode != 0
@@ -88,7 +87,7 @@ def test_timeout(command):
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
     start_time = perf_counter()
-    result = suby(*command, timeout=timeout, catch_exceptions=True)
+    result = run(*command, timeout=timeout, catch_exceptions=True)
     end_time = perf_counter()
 
     assert result.returncode != 0
@@ -112,11 +111,11 @@ def test_timeout_without_catching_exception(command):
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
     with pytest.raises(TimeoutCancellationError):
-        suby(*command, timeout=timeout)
+        run(*command, timeout=timeout)
 
     start_time = perf_counter()
     try:
-        suby(*command, timeout=timeout)
+        run(*command, timeout=timeout)
     except TimeoutCancellationError as e:
         assert e.result.stdout == ''
         assert e.result.stderr == ''
@@ -136,10 +135,10 @@ def test_timeout_without_catching_exception(command):
 )
 def test_exception_in_subprocess_without_catching(command, error_text):
     with pytest.raises(RunningCommandError, match=re.escape(error_text)):
-        suby(*command)
+        run(*command)
 
     try:
-        suby(*command)
+        run(*command)
     except RunningCommandError as e:
         assert e.result.stdout == ''
         assert 'ValueError' in e.result.stderr
@@ -158,7 +157,7 @@ def test_not_catching_output(command):
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby(*command, catch_output=False)
+        result = run(*command, catch_output=False)
 
         stderr = stderr_buffer.getvalue()
         stdout = stdout_buffer.getvalue()
@@ -180,7 +179,7 @@ def test_catching_output(command):
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby(*command, catch_output=True)
+        result = run(*command, catch_output=True)
 
         assert result.returncode == 0
         assert stderr_buffer.getvalue() == ''
@@ -197,7 +196,7 @@ def test_catching_output(command):
 def test_logging_normal_way(command, first_log_message, second_log_message):
     logger = MemoryLogger()
 
-    suby(*command, logger=logger, catch_output=True)
+    run(*command, logger=logger, catch_output=True)
 
     assert len(logger.data.info) == 2
     assert len(logger.data.error) == 0
@@ -217,7 +216,7 @@ def test_logging_normal_way(command, first_log_message, second_log_message):
 def test_logging_with_expired_timeout(command, first_log_message, second_log_message):
     logger = MemoryLogger()
 
-    suby(*command, logger=logger, catch_exceptions=True, catch_output=True, timeout=0.0001)
+    run(*command, logger=logger, catch_exceptions=True, catch_output=True, timeout=0.0001)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -237,7 +236,7 @@ def test_logging_with_expired_timeout(command, first_log_message, second_log_mes
 def test_logging_with_exception(command, first_log_message, second_log_message):
     logger = MemoryLogger()
 
-    suby(*command, logger=logger, catch_exceptions=True, catch_output=True)
+    run(*command, logger=logger, catch_exceptions=True, catch_output=True)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -258,7 +257,7 @@ def test_logging_with_expired_timeout_without_catching_exceptions(command, first
     logger = MemoryLogger()
 
     with pytest.raises(TimeoutCancellationError):
-        suby(*command, logger=logger, catch_output=True, timeout=0.0001)
+        run(*command, logger=logger, catch_output=True, timeout=0.0001)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -279,7 +278,7 @@ def test_logging_with_exception_without_catching_exceptions(command, first_log_m
     logger = MemoryLogger()
 
     with pytest.raises(RunningCommandError):
-        suby(*command, logger=logger, catch_output=True)
+        run(*command, logger=logger, catch_output=True)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -303,7 +302,7 @@ def test_only_token(command):
     start_time = perf_counter()
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
-    result = suby(*command, catch_exceptions=True, token=token)
+    result = run(*command, catch_exceptions=True, token=token)
 
     end_time = perf_counter()
 
@@ -332,7 +331,7 @@ def test_only_token_without_catching(command):
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
     try:
-        result = suby(*command, token=token)
+        result = run(*command, token=token)
     except ConditionCancellationError as e:
         assert e.token is token
         result = e.result
@@ -364,7 +363,7 @@ def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
     try:
-        result = suby(*command, token=token, timeout=3)
+        result = run(*command, token=token, timeout=3)
     except ConditionCancellationError as e:
         assert e.token is token
         result = e.result
@@ -396,7 +395,7 @@ def test_token_plus_timeout_but_timeout_is_less_without_catching(command):
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
     try:
-        result = suby(*command, token=token, timeout=timeout/2)
+        result = run(*command, token=token, timeout=timeout/2)
     except TimeoutCancellationError as e:
         assert e.token is not token
         result = e.result
@@ -426,7 +425,7 @@ def test_replace_stdout_callback(command):
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby(*command, stdout_callback=lambda x: accumulator.append(x))
+        result = run(*command, stdout_callback=lambda x: accumulator.append(x))
 
     assert accumulator == ['kek\n']
 
@@ -452,7 +451,7 @@ def test_replace_stderr_callback(command):
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = suby(*command, stderr_callback=lambda x: accumulator.append(x))
+        result = run(*command, stderr_callback=lambda x: accumulator.append(x))
 
     assert accumulator == ['kek']
 
@@ -474,7 +473,7 @@ def test_replace_stderr_callback(command):
 )
 def test_pass_wrong_positional_argument(arguments, exception_message):
     with pytest.raises(TypeError, match=full_match(exception_message)):
-        suby(*arguments)
+        run(*arguments)
 
 
 @pytest.mark.parametrize(
@@ -489,21 +488,11 @@ def test_use_path_object_as_first_positional_argument(command):
     from shlex import split
 
     print('splitted_comand:', [split(str(x)) for x in command])
-    result = suby(*command)
+    result = run(*command)
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
     assert result.returncode == 0
-
-
-def test_suby_as_attribute_of_suby():
-    assert suby.suby is suby
-
-
-def test_full_import_form():
-    from suby import suby as local_suby
-
-    assert suby is local_suby
 
 
 @pytest.mark.parametrize(
@@ -515,7 +504,7 @@ def test_full_import_form():
     ]
 )
 def test_multiple_args_without_split(command):
-    result = suby(*command, split=False)
+    result = run(*command, split=False)
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
@@ -532,11 +521,11 @@ def test_multiple_args_without_split(command):
 )
 def test_wrong_command(command, exception_message):
     with pytest.raises(WrongCommandError, match=full_match(exception_message)):
-        suby(*command)
+        run(*command)
 
 
 def test_envs_for_subprocess_are_same_as_parent():
-    subprocess_env = json.loads(suby('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
+    subprocess_env = json.loads(run('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
 
     # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
     subprocess_env.pop('LINES', None)
