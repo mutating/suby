@@ -14,16 +14,16 @@ from suby.errors import RunningCommandError, WrongCommandError
 from suby.subprocess_result import SubprocessResult
 
 
-def run(
+def run(  # noqa: PLR0913
     *arguments: Union[str, Path],
     catch_output: bool = False,
     catch_exceptions: bool = False,
-    logger: LoggerProtocol = EmptyLogger(),
+    logger: LoggerProtocol = EmptyLogger(),  # noqa: B008
     stdout_callback: Callable[[str], Any] = stdout_with_flush,
     stderr_callback: Callable[[str], Any] = stderr_with_flush,
     timeout: Optional[Union[int, float]] = None,
     split: bool = True,
-    token: AbstractToken = DefaultToken(),
+    token: AbstractToken = DefaultToken(),  # noqa: B008
 ) -> SubprocessResult:
     """
     About reading from strout and stderr: https://stackoverflow.com/a/28319191/14522393
@@ -44,7 +44,7 @@ def run(
 
     try:
         with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
-            stderr_reading_thread = run_stderr_thread(process, stderr_buffer, result, catch_output, stderr_callback)
+            stderr_reading_thread = run_stderr_thread(process, stderr_buffer, catch_output, stderr_callback)
             if not isinstance(token, DefaultToken):
                 killing_thread = run_killing_thread(process, token, result)
 
@@ -75,7 +75,7 @@ def run(
                     token.check()
                 except CancellationError as e:
                     e.result = result  # type: ignore[attr-defined]
-                    raise e
+                    raise
             else:
                 message = f'Error when executing the command "{arguments_string_representation}".'
                 logger.error(message)
@@ -125,8 +125,8 @@ def run_killing_thread(process: Popen, token: AbstractToken, result: SubprocessR
     return thread
 
 
-def run_stderr_thread(process: Popen, stderr_buffer: List[str], result: SubprocessResult, catch_output: bool, stderr_callback: Callable[[str], Any]) -> Thread:  # type: ignore[type-arg]
-    thread = Thread(target=read_stderr, args=(process, stderr_buffer, result, catch_output, stderr_callback))
+def run_stderr_thread(process: Popen, stderr_buffer: List[str], catch_output: bool, stderr_callback: Callable[[str], Any]) -> Thread:  # type: ignore[type-arg]
+    thread = Thread(target=read_stderr, args=(process, stderr_buffer, catch_output, stderr_callback))
     thread.start()
     return thread
 
@@ -142,7 +142,7 @@ def killing_loop(process: Popen, token: AbstractToken, result: SubprocessResult)
         sleep(0.0001)
 
 
-def read_stderr(process: Popen, stderr_buffer: List[str], result: SubprocessResult, catch_output: bool, stderr_callback: Callable[[str], Any]) -> None:  # type: ignore[type-arg]
+def read_stderr(process: Popen, stderr_buffer: List[str], catch_output: bool, stderr_callback: Callable[[str], Any]) -> None:  # type: ignore[type-arg]
     for line in process.stderr:  # type: ignore[union-attr]
         stderr_buffer.append(line)
         if not catch_output:
