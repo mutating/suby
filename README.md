@@ -19,7 +19,7 @@
 ![logo](https://raw.githubusercontent.com/mutating/suby/develop/docs/assets/logo_5.svg)
 
 
-Here is a small wrapper around the [subprocesses](https://docs.python.org/3/library/subprocess.html). You can find many similar wrappers, but this particular one differs from the others in the following parameters:
+Here is a small wrapper around the [subprocess](https://docs.python.org/3/library/subprocess.html) module. You can find many similar wrappers, but this particular one differs from the others in the following parameters:
 
 - Beautiful minimalistic call syntax.
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
@@ -48,7 +48,7 @@ Install it:
 pip install suby
 ```
 
-And use:
+And use it:
 
 ```python
 from suby import run
@@ -81,13 +81,13 @@ We can see that it returns an object of the `SubprocessResult` class. It contain
 - **id** - a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout** - a string containing the entire buffered output of the command being run.
 - **stderr** - a string containing the entire buffered stderr of the command being run.
-- **returncode** - an integer indicating the return code of the subprocess. `0` means that the process was completed successfully, the other options usually indicate something bad.
+- **returncode** - an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
 - **killed_by_token** - a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should cut the string you passed. The rules for this cutting are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses the [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as a standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses the [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as a standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
 
 In most cases, you will not notice any differences in the parsing rules. For example, the following line:
 
@@ -95,13 +95,13 @@ In most cases, you will not notice any differences in the parsing rules. For exa
 python -c "print('hello, world!')"
 ```
 
-... on Windows should be escaped like here:
+... on Windows should be escaped like this:
 
 ```python
 run('python -c "print^(\'hello, world^!\'^)"')
 ```
 
-... and on other systems like here:
+... and on other systems like this:
 
 ```python
 run('python -c "print(\'hello, world!\')"')
@@ -140,7 +140,7 @@ def my_new_stdout(string: str) -> None:
 
 run('python -c "print(\'hello, world!\')"', stdout_callback=my_new_stdout)
 # > hello, world!
-# You can't see it here, but believe me, if you repeat the code at home, the output in the console will be red!
+# You can't see it here, but if you run this code yourself, the output in the console will be red!
 ```
 
 You can also completely disable the output by passing `True` as the `catch_output` parameter:
@@ -150,12 +150,12 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 # There's nothing here.
 ```
 
-If you specify `catch_output=True`, and at the same time redefine your functions for output, your functions will not be called either. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of the output.
+If you specify `catch_output=True`, and at the same time define custom callback functions, they will not be called either. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of output.
 
 
 ## Logging
 
-By default, `suby` does not log command execution. However, you can pass a logger object to the function, and in this case logs will be recorded at the start of the command execution and at the end of the execution:
+By default, `suby` does not log command execution. However, you can pass a logger object to the function, and in this case messages will be logged at the start of the command execution and at the end:
 
 ```python
 import logging
@@ -239,7 +239,7 @@ So, you can pass your cancellation tokens to `suby`. By default, canceling a tok
 from random import randint
 from cantok import ConditionToken
 
-token = ConditionToken(lambda: randint(1, 1000) == 7)  # This token will be cancelled when a random unlikely event occurs.
+token = ConditionToken(lambda: randint(1, 1000) == 7)  # This token will be canceled when a random unlikely event occurs.
 run('python -c "import time; time.sleep(10_000)"', token=token)
 # > cantok.errors.ConditionCancellationError: The cancellation condition was satisfied.
 ```
@@ -252,7 +252,7 @@ print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exce
 # > SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-"under the hood" a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
+Under the hood, a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
 
 ## Timeouts
 
@@ -263,9 +263,9 @@ run('python -c "import time; time.sleep(10_000)"', timeout=1)
 # > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
 ```
 
-To count the timeout, "under the hood" `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library.
+To count the timeout, under the hood `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library.
 
-The exception corresponding to this token has been reimported to `suby`:
+The exception corresponding to this token has been re-exported to `suby`:
 
 ```python
 from suby import run, TimeoutCancellationError
