@@ -3,7 +3,7 @@
 
 [![Downloads](https://static.pepy.tech/badge/suby/month)](https://pepy.tech/project/suby)
 [![Downloads](https://static.pepy.tech/badge/suby)](https://pepy.tech/project/suby)
-[![codecov](https://codecov.io/gh/mutating/suby/graph/badge.svg?token=IyYI7IaSet)](https://codecov.io/gh/mutating/suby)
+[![Coverage Status](https://coveralls.io/repos/github/mutating/suby/badge.svg?branch=main)](https://coveralls.io/github/mutating/suby?branch=main)
 [![Lines of code](https://sloc.xyz/github/mutating/suby/?category=code)](https://github.com/boyter/scc/)
 [![Hits-of-Code](https://hitsofcode.com/github/mutating/suby?branch=main)](https://hitsofcode.com/github/mutating/suby/view?branch=main)
 [![Test-Package](https://github.com/mutating/suby/actions/workflows/tests_and_coverage.yml/badge.svg)](https://github.com/mutating/suby/actions/workflows/tests_and_coverage.yml)
