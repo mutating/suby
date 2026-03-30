@@ -34,7 +34,6 @@ jobs:
     - name: Run tests and show coverage on the command line
       run: coverage run --source=suby --omit="*tests*" -m pytest --cache-clear --assert=plain && coverage report -m --fail-under=100
 
-
     - name: Upload coverage to Coveralls
       if: runner.os == 'Linux'
       env:
