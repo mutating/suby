@@ -19,7 +19,7 @@
 ![logo](https://raw.githubusercontent.com/mutating/suby/develop/docs/assets/logo_5.svg)
 
 
-Here is a small wrapper around the [subprocess](https://docs.python.org/3/library/subprocess.html) module. You can find many similar wrappers, but this particular one differs from the others in the following parameters:
+Here is a small wrapper around the [subprocess](https://docs.python.org/3/library/subprocess.html) module. You can find many similar wrappers, but this particular one differs from the others in the following ways:
 
 - Beautiful minimalistic call syntax.
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
@@ -87,7 +87,7 @@ We can see that it returns an object of the `SubprocessResult` class. It contain
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses the [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as a standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
 
 In most cases, you will not notice any differences in the parsing rules. For example, the following line:
 
@@ -130,7 +130,7 @@ Of course, in this case, you will have to split the command yourself.
 
 By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created in the main process, so that `stdout` and `stderr` are read independently.
 
-You can override the output functions for `stdout` and `stderr`. To do this, you need to pass as arguments `stdout_callback` and `stderr_callback`, respectively, some functions that accept a string as an argument. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
+You can override the output functions for `stdout` and `stderr`. To do this, you need to pass some functions that accept a string as an argument as the `stdout_callback` and `stderr_callback` arguments, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
 ```python
 from termcolor import colored
@@ -190,7 +190,7 @@ If you still prefer logging, you can use any object that implements the [logger 
 
 By default, `suby` raises exceptions in three cases:
 
-1. If the command you are calling ended with a return code not equal to `0`. In this case, you will see an exception `suby.RunningCommandError`:
+1. If the command ends with a return code not equal to `0`. In this case, you will see an exception `suby.RunningCommandError`:
 
 ```python
 from suby import run, RunningCommandError

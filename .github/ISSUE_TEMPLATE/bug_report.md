@@ -14,7 +14,7 @@ Replace this text with a short description of the error and the behavior that yo
 
 ## Describe the bug in detail
 
-Please add this test in such a way that it reproduces the bug you found and does not pass:
+Please add this test in such a way that it reproduces the bug you found and fails:
 
 ```python
 def test_your_bug():
