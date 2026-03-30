@@ -27,14 +27,6 @@ jobs:
       shell: bash
       run: pip install .
 
-    - name: Run mypy
-      shell: bash
-      run: mypy suby --strict
-
-    - name: Run mypy for tests
-      shell: bash
-      run: mypy tests
-
     - name: Run ruff
       shell: bash
       run: ruff check suby
@@ -42,3 +34,11 @@ jobs:
     - name: Run ruff for tests
       shell: bash
       run: ruff check tests
+
+    - name: Run mypy
+      shell: bash
+      run: mypy --strict suby
+
+    - name: Run mypy for tests
+      shell: bash
+      run: mypy tests
