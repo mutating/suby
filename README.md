@@ -254,7 +254,7 @@ You can set a timeout for `suby`. It must be a number greater than zero, which s
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
-# > cantok.errors.TimeoutCancellationError: The timeout of 1 second has expired.
+# > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
 ```
 
 Under the hood, `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library to track the timeout.
@@ -268,7 +268,7 @@ try:
     run('python -c "import time; time.sleep(10_000)"', timeout=1)
 except TimeoutCancellationError as e:  # As you can see, TimeoutCancellationError is available in the suby module.
     print(e)
-    # > The timeout of 1 second has expired.
+    # > The timeout of 1 seconds has expired.
 ```
 
 Just as with [regular cancellation tokens](#working-with-cancellation-tokens), you can prevent exceptions from being raised using the `catch_exceptions=True` argument:
