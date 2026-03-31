@@ -8,7 +8,7 @@ assignees: pomponchik
 
 ## It's cool that you're here!
 
-Documentation is an important part of the project, we strive to make it high-quality and keep it up to date. Please adjust this template by outlining your proposal.
+Documentation is an important part of the project; we strive to make it high-quality and keep it up to date. Please adjust this template by outlining your proposal.
 
 
 ## Type of action

@@ -19,7 +19,7 @@
 ![logo](https://raw.githubusercontent.com/mutating/suby/develop/docs/assets/logo_5.svg)
 
 
-Here is a small wrapper around the [subprocess](https://docs.python.org/3/library/subprocess.html) module. You can find many similar wrappers, but this particular one differs from the others in the following ways:
+Suby is a small wrapper around the [subprocess](https://docs.python.org/3/library/subprocess.html) module. You can find many similar wrappers, but this particular one differs from the others in the following ways:
 
 - Beautiful minimalistic call syntax.
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
@@ -78,11 +78,11 @@ print(result)
 
 We can see that it returns an object of the `SubprocessResult` class. It contains the following required fields:
 
-- **id** - a unique string that allows you to distinguish one result of calling the same command from another.
-- **stdout** - a string containing the entire buffered output of the command being run.
-- **stderr** - a string containing the entire buffered stderr of the command being run.
-- **returncode** - an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
-- **killed_by_token** - a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
+- **id**: a unique string that allows you to distinguish one result of calling the same command from another.
+- **stdout**: a string containing the entire buffered output of the command being run.
+- **stderr**: a string containing the entire buffered stderr of the command being run.
+- **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
+- **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
 
 ## Command parsing
@@ -130,7 +130,7 @@ Of course, in this case, you will have to split the command yourself.
 
 By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created in the main process, so that `stdout` and `stderr` are read independently.
 
-You can override the output functions for `stdout` and `stderr`. To do this, you need to pass some functions that accept a string as an argument as the `stdout_callback` and `stderr_callback` arguments, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
+You can override the output functions for `stdout` and `stderr`. To do this, you need to pass a function that accepts a string as an argument as the `stdout_callback` and `stderr_callback` arguments, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
 ```python
 from termcolor import colored
@@ -150,7 +150,7 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 # There's nothing here.
 ```
 
-If you specify `catch_output=True`, and at the same time define custom callback functions, they will not be called either. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of output.
+If you specify `catch_output=True`, and at the same time define custom callback functions, they will also not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of output.
 
 
 ## Logging
@@ -173,7 +173,7 @@ run('python -c pass', logger=logging.getLogger('logger_name'))
 # > 2024-02-22 02:15:08,190 [INFO] The command "python -c pass" has been successfully executed.
 ```
 
-The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3.8/library/logging.html#logging-levels). If the command is completed successfully, the end message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
+The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3/library/logging.html#logging-levels). If the command is completed successfully, the end message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
 
 ```python
 run('python -c "raise ValueError"', logger=logging.getLogger('logger_name'), catch_exceptions=True, catch_output=True)
@@ -190,7 +190,7 @@ If you still prefer logging, you can use any object that implements the [logger 
 
 By default, `suby` raises exceptions in three cases:
 
-1. If the command ends with a return code not equal to `0`. In this case, you will see an exception `suby.RunningCommandError`:
+1. If the command exits with a return code not equal to `0`. In this case, you will see an exception `suby.RunningCommandError`:
 
 ```python
 from suby import run, RunningCommandError
@@ -260,10 +260,10 @@ You can set a timeout for `suby`. It must be a number greater than zero, which i
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
-# > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
+# > cantok.errors.TimeoutCancellationError: The timeout of 1 second has expired.
 ```
 
-To count the timeout, under the hood `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library.
+To track the timeout, under the hood `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library.
 
 The exception corresponding to this token has been re-exported to `suby`:
 
@@ -274,7 +274,7 @@ try:
     run('python -c "import time; time.sleep(10_000)"', timeout=1)
 except TimeoutCancellationError as e:  # As you can see, TimeoutCancellationError is available in the suby module.
     print(e)
-    # > The timeout of 1 seconds has expired.
+    # > The timeout of 1 second has expired.
 ```
 
 Just as with [regular cancellation tokens](#working-with-cancellation-tokens), you can prevent exceptions from being raised using the `catch_exceptions=True` argument:
