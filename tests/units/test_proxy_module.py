@@ -23,8 +23,8 @@ from suby import RunningCommandError, WrongCommandError, run
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "print(\'kek\')"'),),
-        (('python -c "print(\'kek\')"',),),
+        (sys.executable, '-c "print(\'kek\')"'),
+        ('python -c "print(\'kek\')"',),
     ],
 )
 def test_normal_way(command):
@@ -38,8 +38,8 @@ def test_normal_way(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "print(\'kek\')"'),),
-        (('python -c "print(\'kek\')"',),),
+        (sys.executable, '-c "print(\'kek\')"'),
+        ('python -c "print(\'kek\')"',),
     ],
 )
 def test_normal_way_with_simple_token(command):
@@ -53,8 +53,8 @@ def test_normal_way_with_simple_token(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),),
-        (('python -c "import sys; sys.stderr.write(\'kek\')"',),),
+        (sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),
+        ('python -c "import sys; sys.stderr.write(\'kek\')"',),
     ],
 )
 def test_stderr_catching(command):
@@ -68,8 +68,8 @@ def test_stderr_catching(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "raise ValueError"'),),
-        (('python -c "raise ValueError"',),),
+        (sys.executable, '-c "raise ValueError"'),
+        ('python -c "raise ValueError"',),
     ],
 )
 def test_catch_exception(command):
@@ -82,8 +82,8 @@ def test_catch_exception(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_timeout(command):
@@ -106,8 +106,8 @@ def test_timeout(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_timeout_without_catching_exception(command):
@@ -151,8 +151,8 @@ def test_exception_in_subprocess_without_catching(command, error_text):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"'),),
-        (('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),),
+        (sys.executable, '-c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"'),
+        ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
     ],
 )
 def test_not_catching_output(command):
@@ -173,8 +173,8 @@ def test_not_catching_output(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"'),),
-        (('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),),
+        (sys.executable, '-c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"'),
+        ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
     ],
 )
 def test_catching_output(command):
@@ -293,8 +293,8 @@ def test_logging_with_exception_without_catching_exceptions(command, first_log_m
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_only_token(command):
@@ -321,8 +321,8 @@ def test_only_token(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_only_token_without_catching(command):
@@ -352,8 +352,8 @@ def test_only_token_without_catching(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
@@ -383,8 +383,8 @@ def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'),),
-        (('python -c "import time; time.sleep({sleep_time})"',),),
+        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
+        ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
 def test_token_plus_timeout_but_timeout_is_less_without_catching(command):
@@ -414,8 +414,8 @@ def test_token_plus_timeout_but_timeout_is_less_without_catching(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "print(\'kek\')"'),),
-        (('python -c "print(\'kek\')"',),),
+        (sys.executable, '-c "print(\'kek\')"'),
+        ('python -c "print(\'kek\')"',),
     ],
 )
 def test_replace_stdout_callback(command):
@@ -440,8 +440,8 @@ def test_replace_stdout_callback(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),),
-        (('python -c "import sys; sys.stderr.write(\'kek\')"',),),
+        (sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),
+        ('python -c "import sys; sys.stderr.write(\'kek\')"',),
     ],
 )
 def test_replace_stderr_callback(command):
@@ -479,9 +479,9 @@ def test_pass_wrong_positional_argument(arguments, exception_message):
 @pytest.mark.parametrize(
     'command',
     [
-        ((Path(sys.executable), '-c "print(\'kek\')"'),),
-        ((sys.executable, '-c "print(\'kek\')"'),),
-        (('python -c "print(\'kek\')"',),),
+        (Path(sys.executable), '-c "print(\'kek\')"'),
+        (sys.executable, '-c "print(\'kek\')"'),
+        ('python -c "print(\'kek\')"',),
     ],
 )
 def test_use_path_object_as_first_positional_argument(command):
@@ -495,9 +495,9 @@ def test_use_path_object_as_first_positional_argument(command):
 @pytest.mark.parametrize(
     'command',
     [
-        ((Path(sys.executable), '-c', 'print(\'kek\')'),),
-        ((sys.executable, '-c', 'print(\'kek\')'),),
-        (('python', '-c', 'print(\'kek\')'),),
+        (Path(sys.executable), '-c', 'print(\'kek\')'),
+        (sys.executable, '-c', 'print(\'kek\')'),
+        ('python', '-c', 'print(\'kek\')'),
     ],
 )
 def test_multiple_args_without_split(command):
@@ -519,6 +519,16 @@ def test_multiple_args_without_split(command):
 def test_wrong_command(command, exception_message):
     with pytest.raises(WrongCommandError, match=full_match(exception_message)):
         run(*command)
+
+
+def test_single_string_is_split_on_all_platforms():
+    # Under the old Windows behavior, a single string was NOT split by shlex —
+    # it was passed as one token to the subprocess, which would fail.
+    # This test verifies that shlex splitting works on all platforms.
+    result = run('python -c pass')
+    assert result.returncode == 0
+    assert result.stdout == ''
+    assert result.stderr == ''
 
 
 def test_envs_for_subprocess_are_same_as_parent():

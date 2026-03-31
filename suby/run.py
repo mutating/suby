@@ -1,4 +1,3 @@
-import platform
 from pathlib import Path
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
@@ -102,8 +101,8 @@ def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> L
                 try:
                     for sub_argument in split_argument(argument):
                         converted_arguments.append(sub_argument)
-                except Exception as e:  # pragma: no cover
-                    raise WrongCommandError(f'The expression "{argument}" cannot be parsed.') from e  # pragma: no cover
+                except Exception as e:
+                    raise WrongCommandError(f'The expression "{argument}" cannot be parsed.') from e
             else:
                 converted_arguments.append(argument)
         else:
@@ -113,9 +112,6 @@ def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> L
 
 
 def split_argument(argument: str) -> List[str]:
-    # https://stackoverflow.com/a/35900070/14522393
-    if platform.system() == 'Windows':
-        return [argument]  # pragma: no cover
     return shlex_split(argument)
 
 

@@ -87,21 +87,15 @@ It returns an object of the `SubprocessResult` class, which contains the followi
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call accepts not a single line of input, but a list of substrings. This means that under the hood, `suby` splits the string you pass. The splitting rules vary between operating systems. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call accepts not a single line of input, but a list of substrings. This means that under the hood, `suby` splits the string you pass using [shlex](https://docs.python.org/3/library/shlex.html) on all platforms.
 
-In most cases, you will not notice any differences in the parsing rules. For example, the following line:
+For example, the following line:
 
 ```bash
 python -c "print('hello, world!')"
 ```
 
-... on Windows should be escaped like this:
-
-```python
-run('python -c "print^(\'hello, world^!\'^)"')
-```
-
-... and on other systems like this:
+... should be written like this:
 
 ```python
 run('python -c "print(\'hello, world!\')"')
