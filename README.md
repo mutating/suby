@@ -24,7 +24,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - Beautiful minimalistic call syntax.
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
 - Support for [cancellation tokens](https://github.com/pomponchik/cantok).
-- You can set timeouts for subprocesses.
+- Ability to set timeouts for subprocesses.
 - Logging of command execution.
 
 
@@ -76,7 +76,7 @@ print(result)
 # > SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
 ```
 
-We can see that it returns an object of the `SubprocessResult` class. It contains the following required fields:
+We can see that it returns an object of the `SubprocessResult` class. It contains the following fields:
 
 - **id**: a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout**: a string containing the entire buffered output of the command being run.
@@ -87,7 +87,7 @@ We can see that it returns an object of the `SubprocessResult` class. It contain
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules are usually also different for different operating systems and depend on the specific shell you prefer. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules vary between operating systems. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
 
 In most cases, you will not notice any differences in the parsing rules. For example, the following line:
 
@@ -123,14 +123,14 @@ If for some reason you want to disable the automatic splitting of strings into p
 run('python', '-c', 'print(777)', split=False)
 ```
 
-Of course, in this case, you will have to split the command yourself.
+In this case, you will have to split the command yourself.
 
 
 ## Output
 
-By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created in the main process, so that `stdout` and `stderr` are read independently.
+By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output happens each time a full line is read. For continuous reading from `stderr`, a separate thread is created so that `stdout` and `stderr` are read independently.
 
-You can override the output functions for `stdout` and `stderr`. To do this, you need to pass a function that accepts a string as an argument as the `stdout_callback` and `stderr_callback` arguments, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
+You can override the output functions for `stdout` and `stderr`. To do this, you need to pass functions accepting a string as an argument via the `stdout_callback` and `stderr_callback` parameters, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
 ```python
 from termcolor import colored
@@ -155,7 +155,7 @@ If you specify `catch_output=True`, and at the same time define custom callback 
 
 ## Logging
 
-By default, `suby` does not log command execution. However, you can pass a logger object to the function, and in this case messages will be logged at the start of the command execution and at the end:
+By default, `suby` does not log command execution. However, you can pass a logger object to the function, and in this case messages will be logged at the start and end of command execution:
 
 ```python
 import logging
@@ -173,7 +173,7 @@ run('python -c pass', logger=logging.getLogger('logger_name'))
 # > 2024-02-22 02:15:08,190 [INFO] The command "python -c pass" has been successfully executed.
 ```
 
-The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3/library/logging.html#logging-levels). If the command is completed successfully, the end message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
+The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3/library/logging.html#logging-levels). If the command is completed successfully, the completion message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
 
 ```python
 run('python -c "raise ValueError"', logger=logging.getLogger('logger_name'), catch_exceptions=True, catch_output=True)
@@ -202,11 +202,11 @@ except RunningCommandError as e:
     # > Error when executing the command "python -c 1/0".
 ```
 
-2. If you passed a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token was canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of canceled token. [This part of the functionality](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it beforehand.
+2. If you passed a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token was canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This part of the functionality](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
 
 3. If you have set a [timeout](#timeouts) for the operation and it has expired.
 
-You can prevent `suby` from raising any exceptions. To do this, set the `catch_exceptions` parameter to `True`:
+You can prevent `suby` from raising these exceptions. To do this, set the `catch_exceptions` parameter to `True`:
 
 ```python
 result = run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True)

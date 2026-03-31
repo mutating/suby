@@ -23,7 +23,7 @@ def test_your_bug():
 
 When writing the test, please ensure compatibility with the [`pytest`](https://docs.pytest.org/) framework.
 
-If for some reason you cannot describe the error in the test format, describe here the steps to reproduce it.
+If for some reason you cannot describe the error in the test format, describe the steps to reproduce it here.
 
 
 ## Environment
