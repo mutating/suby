@@ -76,18 +76,18 @@ print(result)
 # > SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
 ```
 
-We can see that it returns an object of the `SubprocessResult` class. It contains the following fields:
+It returns an object of the `SubprocessResult` class. It contains the following fields:
 
 - **id**: a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout**: a string containing the entire buffered output of the command being run.
-- **stderr**: a string containing the entire buffered stderr of the command being run.
+- **stderr**: a string containing the entire stderr output of the command being run.
 - **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
 - **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that somewhere under the hood, `suby` should split the string you passed. The splitting rules vary between operating systems. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
+Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call usually accepts not one whole line of input, but a list of substrings. This means that under the hood, `suby` splits the string you pass. The splitting rules vary between operating systems. `suby` uses [CMD](https://en.wikipedia.org/wiki/Cmd.exe) as the standard for [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows) and [POSIX](https://en.wikipedia.org/wiki/POSIX) for POSIX-compatible systems.
 
 In most cases, you will not notice any differences in the parsing rules. For example, the following line:
 
@@ -117,7 +117,7 @@ run(Path(sys.executable), '-c print(777)')
 # This will work too.
 ```
 
-If for some reason you want to disable the automatic splitting of strings into parts, pass `split=False`:
+If for some reason you want to disable automatic string splitting, pass `split=False`:
 
 ```python
 run('python', '-c', 'print(777)', split=False)
@@ -150,7 +150,7 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 # There's nothing here.
 ```
 
-If you specify `catch_output=True`, and at the same time define custom callback functions, they will also not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the collection and buffering of output.
+If you specify `catch_output=True`, and at the same time define custom callback functions, they will also not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the buffering of output.
 
 
 ## Logging
@@ -190,7 +190,7 @@ If you still prefer logging, you can use any object that implements the [logger 
 
 By default, `suby` raises exceptions in three cases:
 
-1. If the command exits with a return code not equal to `0`. In this case, you will see an exception `suby.RunningCommandError`:
+1. If the command exits with a return code not equal to `0`. In this case, a `RunningCommandError` exception will be raised:
 
 ```python
 from suby import run, RunningCommandError
@@ -214,7 +214,7 @@ print(result)
 # > SubprocessResult(id='c9125b90d03111ee9660320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-Keep in mind that the full result of the subprocess call can also be found through the `result` attribute of any raised exception:
+Keep in mind that the full result of the subprocess call can also be found through the `result` attribute of any exception raised by `suby`:
 
 ```python
 from suby import run, TimeoutCancellationError
@@ -231,9 +231,9 @@ except TimeoutCancellationError as e:
 
 `suby` is fully compatible with the [cancellation token pattern](https://cantok.readthedocs.io/en/latest/the_pattern/) and supports any token objects from the [`cantok`](https://github.com/pomponchik/cantok) library.
 
-The essence of the pattern is that you can pass an object to `suby`, from which it can find out whether the operation still needs to be continued or not. If not, it kills the subprocess. This pattern can be especially useful in the case of commands that are executed for a long time or for an unpredictably long time. When the result becomes unnecessary, there is no point in sitting and waiting for the command to complete.
+The essence of the pattern is that you can pass an object to `suby` that signals whether the operation should continue. If not, it kills the subprocess. This pattern can be especially useful in the case of commands that are executed for a long time or for an unpredictably long time. When the result becomes unnecessary, there is no point in sitting and waiting for the command to complete.
 
-So, you can pass your cancellation tokens to `suby`. By default, canceling a token causes an exception to be raised:
+In practice, you can pass your cancellation tokens to `suby`. By default, canceling a token causes an exception to be raised:
 
 ```python
 from random import randint
@@ -256,7 +256,7 @@ Under the hood, a separate thread is created to track the status of the token. W
 
 ## Timeouts
 
-You can set a timeout for `suby`. It must be a number greater than zero, which indicates the number of seconds that the subprocess can continue to run. If the timeout expires before the subprocess completes, an exception will be raised:
+You can set a timeout for `suby`. It must be a number greater than zero, which specifies the maximum number of seconds the subprocess is allowed to run. If the timeout expires before the subprocess completes, an exception will be raised:
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
