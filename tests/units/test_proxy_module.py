@@ -539,3 +539,46 @@ def test_envs_for_subprocess_are_same_as_parent():
     subprocess_env.pop('COLUMNS', None)
 
     assert subprocess_env == environ
+
+
+def test_executable_path_with_backslashes_passed_as_string():
+    # On Windows, sys.executable is a path like C:\Python\python.exe.
+    # shlex with posix=True treats \ as an escape character, silently eating backslashes.
+    # This test verifies that backslashes in paths survive shlex splitting.
+    result = run(sys.executable, '-c pass')
+    assert result.returncode == 0
+
+
+def test_executable_path_with_spaces_passed_as_unquoted_string_fails(tmp_path):
+    # When a path containing spaces is embedded in a command string without quotes,
+    # shlex splits on the space and the command fails.
+    # To pass such a path correctly, it must be either quoted in the string
+    # or passed as a separate Path object.
+    space_dir = tmp_path / 'dir with space'
+    space_dir.mkdir()
+    script = space_dir / 'script.py'
+    script.write_text('pass')
+
+    with pytest.raises(RunningCommandError):
+        # shlex splits on the space → python receives 'dir', 'with', 'space/script.py'
+        # as separate arguments instead of the script path
+        run(f'python {script}')
+
+
+def test_argument_with_trailing_backslash(tmp_path):
+    # On Windows, subprocess uses list2cmdline to convert the arg list back into a
+    # command string for CreateProcess. list2cmdline wraps args that contain spaces in
+    # double quotes. If such an arg ends in \, the result is "arg\" — the \" is
+    # interpreted by the Windows parser as an escaped quote, not a closing quote,
+    # which mangles the argument and everything that follows.
+    dir_with_trailing_backslash = str(tmp_path) + '\\'  # tmp_path on Windows has spaces
+
+    result = run(
+        sys.executable,
+        '-c', 'import sys; print(sys.argv[1])',
+        dir_with_trailing_backslash,
+        split=False,
+        catch_output=True,
+    )
+
+    assert result.stdout.strip() == dir_with_trailing_backslash
