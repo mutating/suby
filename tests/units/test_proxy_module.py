@@ -582,3 +582,49 @@ def test_argument_with_trailing_backslash(tmp_path):
     )
 
     assert result.stdout.strip() == dir_with_trailing_backslash
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
+def test_double_backslash_enabled_by_default_on_windows():
+    # sys.executable on Windows is a path like C:\Python\python.exe.
+    # With double_backslash=True (the default on Windows), backslashes survive shlex splitting.
+    result = run(f'{sys.executable} -c "print(\'kek\')"', catch_output=True)
+    assert result.returncode == 0
+    assert result.stdout == 'kek\n'
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
+def test_double_backslash_can_be_disabled_on_windows():
+    # With double_backslash=False, shlex eats the backslashes in the path, making the executable path invalid.
+    # r'C:\fake\python.exe' → shlex in posix mode: \f→f, \p→p → 'C:fakepython.exe'
+    with pytest.raises(RunningCommandError, match=full_match('Error when executing the command "C:fakepython.exe -c pass".')):
+        run(r'C:\fake\python.exe -c pass', double_backslash=False)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
+def test_double_backslash_disabled_by_default_on_non_windows():
+    # On non-Windows with default double_backslash=False, shlex treats \ as escape character.
+    # "hello\ world" is parsed as a single argument "hello world" (backslash escapes the space).
+    result = run(
+        sys.executable,
+        '-c "import sys; print(sys.argv[1])"',
+        r'hello\ world',
+        catch_output=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == 'hello world'
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
+def test_double_backslash_can_be_enabled_on_non_windows():
+    # With double_backslash=True, backslashes are doubled before shlex, so they survive splitting.
+    # "hello\ world" becomes "hello\\ world" before shlex, which parses it as two args: "hello\" and "world".
+    result = run(
+        sys.executable,
+        '-c "import sys; print(sys.argv[1])"',
+        r'hello\ world',
+        double_backslash=True,
+        catch_output=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == 'hello\\'

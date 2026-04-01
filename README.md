@@ -33,6 +33,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - [**Quick start**](#quick-start)
 - [**Run subprocess and look at the result**](#run-subprocess-and-look-at-the-result)
 - [**Command parsing**](#command-parsing)
+  - [**Backslashes on Windows**](#backslashes-on-windows)
 - [**Output**](#output)
 - [**Logging**](#logging)
 - [**Exceptions**](#exceptions)
@@ -101,14 +102,19 @@ python -c "print('hello, world!')"
 run('python -c "print(\'hello, world!\')"')
 ```
 
-You can pass not only strings to `run`, but also [`pathlib.Path`](https://docs.python.org/3/library/pathlib.html#pathlib.Path) objects:
+You can pass multiple strings as positional arguments. Each string is split independently and the results are concatenated:
+
+```python
+run('python', '-c "print(777)"')
+```
+
+You can also pass [`pathlib.Path`](https://docs.python.org/3/library/pathlib.html#pathlib.Path) objects as positional arguments. They are converted to strings automatically and are not subject to splitting:
 
 ```python
 import sys
 from pathlib import Path
 
 run(Path(sys.executable), '-c print(777)')
-# This will work too.
 ```
 
 To disable automatic string splitting, pass `split=False`:
@@ -117,7 +123,27 @@ To disable automatic string splitting, pass `split=False`:
 run('python', '-c', 'print(777)', split=False)
 ```
 
-In this case, you will have to split the command yourself.
+In this case, you will have to split the command yourself. You can still pass multiple strings — they will be used as-is without any splitting.
+
+
+### Backslashes on Windows
+
+The [shlex](https://docs.python.org/3/library/shlex.html) module operates in POSIX mode, which means it treats the backslash (`\`) as an escape character. This is problematic on Windows, where backslashes are used as path separators — `shlex` would silently eat them.
+
+To work around this, `suby` automatically doubles all backslashes in command strings before passing them to `shlex` on Windows. This is controlled by the `double_backslash` parameter, which defaults to `True` on Windows and `False` on other platforms:
+
+```python
+# On Windows, backslashes in paths are preserved by default:
+run(r'C:\Python\python.exe -c pass')
+
+# You can disable this behavior:
+run(r'C:\Python\python.exe -c pass', double_backslash=False)
+
+# Or enable it on non-Windows platforms:
+run(r'path\to\executable -c pass', double_backslash=True)
+```
+
+Note that this only affects string arguments that go through `shlex` splitting. `Path` objects and arguments passed with `split=False` are not affected.
 
 
 ## Output

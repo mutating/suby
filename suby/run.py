@@ -1,4 +1,5 @@
 from pathlib import Path
+from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
 from threading import Thread
@@ -22,6 +23,7 @@ def run(  # noqa: PLR0913
     stderr_callback: Callable[[str], Any] = stderr_with_flush,
     timeout: Optional[Union[int, float]] = None,
     split: bool = True,
+    double_backslash: bool = system() == 'Windows',
     token: AbstractToken = DefaultToken(),  # noqa: B008
 ) -> SubprocessResult:
     """
@@ -32,7 +34,7 @@ def run(  # noqa: PLR0913
     elif timeout is not None:
         token += TimeoutToken(timeout)
 
-    converted_arguments = convert_arguments(arguments, split)
+    converted_arguments = convert_arguments(arguments, split, double_backslash)
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
     stdout_buffer: List[str] = []
@@ -90,7 +92,7 @@ def run(  # noqa: PLR0913
     return result
 
 
-def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> List[str]:
+def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool, double_backslash: bool) -> List[str]:
     converted_arguments = []
 
     for argument in arguments:
@@ -99,7 +101,7 @@ def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> L
         elif isinstance(argument, str):
             if split:
                 try:
-                    for sub_argument in split_argument(argument):
+                    for sub_argument in split_argument(argument, double_backslash):
                         converted_arguments.append(sub_argument)
                 except Exception as e:
                     raise WrongCommandError(f'The expression "{argument}" cannot be parsed.') from e
@@ -111,7 +113,9 @@ def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool) -> L
     return converted_arguments
 
 
-def split_argument(argument: str) -> List[str]:
+def split_argument(argument: str, double_backslash: bool) -> List[str]:
+    if double_backslash:
+        argument = argument.replace('\\', '\\\\')
     return shlex_split(argument)
 
 
