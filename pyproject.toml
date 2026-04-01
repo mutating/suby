@@ -35,6 +35,7 @@ classifiers = [
     'License :: OSI Approved :: MIT License',
     'Intended Audience :: Developers',
     'Topic :: Software Development :: Libraries',
+    'Typing :: Typed',
 ]
 keywords = [
     'subprocesses',
