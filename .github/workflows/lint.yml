@@ -9,13 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.7']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', '3.15.0-alpha.1']
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v5
       with:
           python-version: ${{ matrix.python-version }}
 
@@ -27,18 +27,18 @@ jobs:
       shell: bash
       run: pip install .
 
+    - name: Run ruff
+      shell: bash
+      run: ruff check suby
+
+    - name: Run ruff for tests
+      shell: bash
+      run: ruff check tests
+
     - name: Run mypy
       shell: bash
-      run: mypy suby --strict
+      run: mypy --strict suby
 
     - name: Run mypy for tests
       shell: bash
       run: mypy tests
-
-    - name: Run ruff
-      shell: bash
-      run: ruff suby
-
-    - name: Run ruff for tests
-      shell: bash
-      run: ruff tests

@@ -1,9 +1,5 @@
-import sys
+from cantok import TimeoutCancellationError as TimeoutCancellationError
 
-from suby.proxy_module import ProxyModule as ProxyModule
-from suby.errors import RunningCommandError as RunningCommandError  # noqa: F401
-
-from cantok import TimeoutCancellationError as TimeoutCancellationError  # noqa: F401
-
-
-sys.modules[__name__].__class__ = ProxyModule
+from suby.errors import RunningCommandError as RunningCommandError
+from suby.errors import WrongCommandError as WrongCommandError
+from suby.run import run as run

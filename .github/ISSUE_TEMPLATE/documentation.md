@@ -8,19 +8,19 @@ assignees: pomponchik
 
 ## It's cool that you're here!
 
-Documentation is an important part of the project, we strive to make it high-quality and keep it up to date. Please adjust this template by outlining your proposal.
+Documentation is an important part of the project; we strive to make it high-quality and keep it up to date. Please adjust this template by outlining your proposal.
 
 
 ## Type of action
 
-What do you want to do: remove something, add it, or change it?
+What do you want to do: remove something, add something, or change something?
 
 
 ## Where?
 
-Specify which part of the documentation you want to make a change to? For example, the name of an existing documentation section or the line number in a file `README.md`.
+Specify which part of the documentation you want to change. For example, the name of an existing documentation section or a line number in `README.md`.
 
 
 ## The essence
 
-Please describe the essence of the proposed change
+Please describe the essence of the proposed change.

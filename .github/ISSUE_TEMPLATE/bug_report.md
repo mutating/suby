@@ -14,16 +14,16 @@ Replace this text with a short description of the error and the behavior that yo
 
 ## Describe the bug in detail
 
-Please add this test in such a way that it reproduces the bug you found and does not pass:
+Please add a test that reproduces the bug (i.e., currently fails):
 
 ```python
 def test_your_bug():
     ...
 ```
 
-Writing the test, please keep compatibility with the [`pytest`](https://docs.pytest.org/) framework.
+When writing the test, please ensure compatibility with the [`pytest`](https://docs.pytest.org/) framework.
 
-If for some reason you cannot describe the error in the test format, describe here the steps to reproduce it.
+If for some reason you cannot describe the error in the test format, describe the steps to reproduce it here.
 
 
 ## Environment
