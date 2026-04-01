@@ -89,27 +89,22 @@ It returns an object of the `SubprocessResult` class, which contains the followi
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call accepts not a single line of input, but a list of substrings. This means that under the hood, `suby` splits the string you pass using [shlex](https://docs.python.org/3/library/shlex.html) on all platforms.
+`suby` always builds an argument list for `subprocess`. By default, every string positional argument is split with [shlex](https://docs.python.org/3/library/shlex.html), and the resulting parts are concatenated.
 
-For example, the following line:
+The contract is:
 
-```bash
-python -c "print('hello, world!')"
-```
+- `str`: split with `shlex`
+- `Path`: converted to `str` without splitting
+- `split=False`: disable splitting for all string arguments
 
-... should be written like this:
+Examples:
 
 ```python
 run('python -c "print(\'hello, world!\')"')
-```
-
-You can pass multiple strings as positional arguments. Each string is split independently and the results are concatenated:
-
-```python
 run('python', '-c "print(777)"')
 ```
 
-You can also pass [`pathlib.Path`](https://docs.python.org/3/library/pathlib.html#pathlib.Path) objects as positional arguments. They are converted to strings automatically and are not subject to splitting:
+`Path` arguments are passed through unchanged except for string conversion:
 
 ```python
 import sys
@@ -118,13 +113,11 @@ from pathlib import Path
 run(Path(sys.executable), '-c print(777)')
 ```
 
-To disable automatic string splitting, pass `split=False`:
+If you pass `split=False`, you must provide arguments in their final form:
 
 ```python
 run('python', '-c', 'print(777)', split=False)
 ```
-
-In this case, you will have to split the command yourself. You can still pass multiple strings — they will be used as-is without any splitting.
 
 
 ### Backslashes on Windows
