@@ -8,7 +8,6 @@ from pathlib import Path
 from threading import Thread
 from time import perf_counter
 
-import full_match
 import pytest
 from cantok import (
     CancellationError,
@@ -18,6 +17,7 @@ from cantok import (
     TimeoutCancellationError,
 )
 from emptylog import MemoryLogger
+from full_match import match
 
 import suby
 from suby import RunningCommandError, WrongCommandError, run
@@ -476,7 +476,7 @@ def test_replace_stderr_callback(command):
     ],
 )
 def test_pass_wrong_positional_argument(arguments, exception_message):
-    with pytest.raises(TypeError, match=full_match(exception_message)):
+    with pytest.raises(TypeError, match=match(exception_message)):
         run(*arguments)
 
 
@@ -521,7 +521,7 @@ def test_multiple_args_without_split(command):
     ],
 )
 def test_wrong_command(command, exception_message):
-    with pytest.raises(WrongCommandError, match=full_match(exception_message)):
+    with pytest.raises(WrongCommandError, match=match(exception_message)):
         run(*command)
 
 
@@ -601,7 +601,7 @@ def test_double_backslash_enabled_by_default_on_windows():
 def test_double_backslash_can_be_disabled_on_windows():
     # With double_backslash=False, shlex eats the backslashes in the path, making the executable path invalid.
     # r'C:\fake\python.exe' → shlex in posix mode: \f→f, \p→p → 'C:fakepython.exe'
-    with pytest.raises(RunningCommandError, match=full_match('Error when executing the command "C:fakepython.exe -c pass".')):
+    with pytest.raises(RunningCommandError, match=match('Error when executing the command "C:fakepython.exe -c pass".')):
         run(r'C:\fake\python.exe -c pass', double_backslash=False)
 
 
@@ -719,7 +719,7 @@ def test_immediately_satisfied_condition_token_kills_process():
 
 
 def test_timeout_exception_message():
-    with pytest.raises(TimeoutCancellationError, match=full_match('The timeout of 1 seconds has expired.')):
+    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(100)"', timeout=1)
 
 

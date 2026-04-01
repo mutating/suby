@@ -4,10 +4,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-import full_match
 import pytest
 from cantok import ConditionCancellationError, ConditionToken
 from emptylog import MemoryLogger
+from full_match import match
 
 from suby import RunningCommandError, TimeoutCancellationError, run
 
@@ -162,7 +162,7 @@ def test_catch_exceptions_with_timeout_returns_result():
 
 
 def test_timeout_cancellation_error_carries_result():
-    with pytest.raises(TimeoutCancellationError, match=full_match('The timeout of 1 seconds has expired.')):
+    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
 
@@ -220,7 +220,7 @@ def test_condition_token_result_repr():
 
 
 def test_timeout_raises_timeout_cancellation_error():
-    with pytest.raises(TimeoutCancellationError, match=full_match('The timeout of 1 seconds has expired.')):
+    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
 
