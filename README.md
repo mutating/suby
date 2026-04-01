@@ -25,6 +25,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
 - Support for [cancellation tokens](https://github.com/pomponchik/cantok).
 - Ability to set timeouts for subprocesses.
+- Efficient event-driven process waiting using `pidfd` (Linux) and `kqueue` (macOS).
 - Logging of command execution.
 
 

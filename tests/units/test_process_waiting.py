@@ -1,0 +1,387 @@
+import importlib
+import os
+import signal
+import subprocess
+import sys
+import time
+from threading import Thread
+from time import monotonic
+from unittest.mock import patch
+
+import pytest
+from cantok import SimpleToken, TimeoutCancellationError
+
+from suby import run
+from suby.process_waiting import (
+    has_event_driven_wait,
+    wait_for_process_exit,
+)
+from suby.subprocess_result import SubprocessResult
+
+_run_module = importlib.import_module('suby.run')
+
+
+_is_event_driven_platform = has_event_driven_wait()
+_is_macos = sys.platform == 'darwin'
+_is_linux = sys.platform == 'linux'
+_has_pidfd = hasattr(os, 'pidfd_open')
+
+_SLEEP_CMD = f'{sys.executable} -c "import time; time.sleep(1000)"'
+_SHORT_SLEEP_CMD = f'{sys.executable} -c "import time; time.sleep(0.1)"'
+_PRINT_CMD = f'{sys.executable} -c "print(\'hello\')"'
+_PASS_CMD = f'{sys.executable} -c pass'
+
+
+# --- A. Tests for suby/process_waiting.py ---
+
+
+@pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
+def test_event_driven_detects_already_exited_process():
+    """Event-driven wait returns instantly for an already-exited (zombie) process."""
+    process = subprocess.Popen([sys.executable, '-c', 'pass'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process.stdout.close()  # type: ignore[union-attr]
+    process.stderr.close()  # type: ignore[union-attr]
+    time.sleep(0.5)
+
+    start = monotonic()
+    wait_for_process_exit(process, 10.0)
+    elapsed = monotonic() - start
+
+    process.wait()
+    assert elapsed < 2.0
+
+
+@pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
+def test_event_driven_wakes_on_process_exit():
+    """Event-driven wait returns promptly when a process exits during the wait."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(0.1)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    start = monotonic()
+    wait_for_process_exit(process, 10.0)
+    elapsed = monotonic() - start
+
+    process.wait()
+    assert elapsed < 2.0
+
+
+def test_timeout_expiry_process_still_running():
+    """When timeout expires and process is still running, the process remains alive."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        wait_for_process_exit(process, 0.1)
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+
+
+@pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven waiter to trigger OSError from')
+def test_oserror_fallback_with_reaped_pid():
+    """When event-driven waiter gets OSError (reaped PID), falls back gracefully without raising."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'pass'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    process.wait()
+    wait_for_process_exit(process, 0.1)
+
+
+@pytest.mark.skipif(not _is_macos, reason='macOS only')
+def test_has_event_driven_wait_true_on_macos():
+    """On macOS, event-driven waiting is available via kqueue."""
+    assert has_event_driven_wait() is True
+
+
+@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
+def test_has_event_driven_wait_true_on_linux():
+    """On Linux with pidfd_open, event-driven waiting is available."""
+    assert has_event_driven_wait() is True
+
+
+@pytest.mark.skipif(_is_event_driven_platform, reason='Only for fallback platforms')
+def test_has_event_driven_wait_false_on_fallback():
+    """On platforms without pidfd or kqueue, event-driven waiting is unavailable."""
+    assert has_event_driven_wait() is False
+
+
+@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux with /proc only')
+def test_fd_cleanup_no_leaks():
+    """Repeated calls to wait_for_process_exit do not leak file descriptors."""
+    fd_count_before = len(list(os.scandir(f'/proc/{os.getpid()}/fd')))
+
+    for _ in range(100):
+        process = subprocess.Popen(
+            [sys.executable, '-c', 'pass'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        wait_for_process_exit(process, 1.0)
+        process.wait()
+
+    fd_count_after = len(list(os.scandir(f'/proc/{os.getpid()}/fd')))
+    assert fd_count_after <= fd_count_before + 5
+
+
+def test_concurrent_calls_thread_safety():
+    """Multiple threads can call wait_for_process_exit for the same process without errors."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    errors = []
+
+    def worker():
+        try:
+            wait_for_process_exit(process, 0.1)
+        except OSError as e:
+            errors.append(e)
+
+    try:
+        threads = [Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(errors) == 0
+    finally:
+        process.kill()
+        process.wait()
+
+
+@pytest.mark.skipif(not _is_macos, reason='macOS only')
+def test_wait_kqueue_direct():
+    """Direct call to _wait_kqueue with a running process returns without killing it."""
+    from suby.process_waiting import _wait_kqueue  # noqa: PLC0415
+
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_kqueue(process.pid, 0.01)
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+
+
+@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
+def test_wait_pidfd_direct():
+    """Direct call to _wait_pidfd with a running process returns without killing it."""
+    from suby.process_waiting import _wait_pidfd  # noqa: PLC0415
+
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_pidfd(process.pid, 0.01)
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+
+
+# --- B. Tests for timeout-only path (timeout_wait) ---
+
+
+def test_timeout_kills_long_running_process():
+    """Timeout-only path kills the process and raises TimeoutCancellationError."""
+    with pytest.raises(TimeoutCancellationError):
+        run(_SLEEP_CMD, timeout=0.5)
+
+
+def test_process_exits_before_timeout():
+    """When process exits before timeout, no exception is raised and output is captured."""
+    result = run(_PRINT_CMD, timeout=10, catch_output=True)
+    assert result.stdout == 'hello\n'
+    assert result.returncode == 0
+    assert result.killed_by_token is False
+
+
+def test_very_short_timeout():
+    """Very short timeout still kills the process and raises."""
+    with pytest.raises(TimeoutCancellationError):
+        run(_SLEEP_CMD, timeout=0.001)
+
+
+def test_timeout_with_catch_exceptions():
+    """With catch_exceptions=True, timeout doesn't raise but result reflects the kill."""
+    result = run(_SLEEP_CMD, timeout=0.5, catch_exceptions=True)
+    assert result.killed_by_token is True
+    assert result.returncode != 0
+
+
+@pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
+def test_event_driven_fast_process_exit_detection():
+    """On event-driven platforms, process exit is detected near-instantly, not after full timeout."""
+    start = monotonic()
+    result = run(_SHORT_SLEEP_CMD, timeout=10, catch_output=True)
+    elapsed = monotonic() - start
+
+    assert result.returncode == 0
+    assert elapsed < 2.0
+
+
+# --- C. Tests verifying new mechanism is NOT used when it shouldn't be ---
+
+
+def test_token_only_does_not_use_event_driven():
+    """When only a token is passed (no timeout), wait_for_process_exit is not called."""
+    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait:
+        result = run(_PRINT_CMD, token=SimpleToken(), catch_output=True)
+        mock_wait.assert_not_called()
+    assert result.stdout == 'hello\n'
+
+
+def test_token_plus_timeout_does_not_use_event_driven():
+    """When both token and timeout are passed, wait_for_process_exit is not called."""
+    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait:
+        with pytest.raises(TimeoutCancellationError):
+            run(_SLEEP_CMD, timeout=0.5, token=SimpleToken())
+        mock_wait.assert_not_called()
+
+
+def test_no_timeout_no_token_does_not_use_event_driven():
+    """When neither timeout nor token is passed, no killing mechanism is started."""
+    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait, \
+         patch.object(_run_module, 'killing_loop') as mock_killing:
+        result = run(_PRINT_CMD, catch_output=True)
+        mock_wait.assert_not_called()
+        mock_killing.assert_not_called()
+    assert result.stdout == 'hello\n'
+
+
+# --- E. Edge cases ---
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='No SIGTERM on Windows')
+def test_process_killed_by_signal_during_wait():
+    """Event-driven wait detects process killed by external signal."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    def kill_later():
+        time.sleep(0.2)
+        os.kill(process.pid, signal.SIGTERM)
+
+    t = Thread(target=kill_later)
+    t.start()
+
+    start = monotonic()
+    wait_for_process_exit(process, 10.0)
+    elapsed = monotonic() - start
+    t.join()
+
+    process.wait()
+    assert elapsed < 2.0
+
+
+def test_rapid_sequential_timeout_calls():
+    """Rapid sequential calls with timeout don't leak resources."""
+    for _ in range(10):
+        result = run(_PASS_CMD, timeout=1, catch_output=True)
+        assert result.returncode == 0
+
+
+def test_timeout_zero():
+    """Timeout of 0 kills the process immediately."""
+    with pytest.raises(TimeoutCancellationError):
+        run(_SLEEP_CMD, timeout=0)
+
+
+def test_race_process_exits_between_poll_and_kill():
+    """When process exits between poll() and kill(), the OSError is caught gracefully."""
+    from suby.run import timeout_wait  # noqa: PLC0415
+
+    class MockProcess:
+        pid = 99999
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            raise ProcessLookupError('No such process')
+
+    result = SubprocessResult()
+    with patch.object(_run_module, 'wait_for_process_exit'):
+        timeout_wait(MockProcess(), 1.0, result)  # type: ignore[arg-type]
+
+    assert result.killed_by_token is False
+
+
+def test_timeout_raises_timeout_cancellation_error_with_result():
+    """TimeoutCancellationError carries the result object with correct fields."""
+    with pytest.raises(TimeoutCancellationError) as exc_info:
+        run(_SLEEP_CMD, timeout=0.5)
+    assert hasattr(exc_info.value, 'result')
+    assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
+def test_oserror_fallback_returns_promptly_on_exit():
+    """When event-driven waiter raises OSError, fallback to process.wait() detects early exit."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'pass'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    time.sleep(0.5)
+
+    with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
+        start = monotonic()
+        wait_for_process_exit(process, 10.0)
+        elapsed = monotonic() - start
+
+    process.wait()
+    assert elapsed < 2.0
+
+
+def test_oserror_fallback_with_timeout_expiry():
+    """When event-driven waiter raises OSError and process is still running, fallback times out."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
+            wait_for_process_exit(process, 0.1)
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_wait_for_process_exit_without_event_driven_waiter():
+    """When _event_driven_waiter is None, falls back to process.wait() directly."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        with patch('suby.process_waiting._event_driven_waiter', None):
+            wait_for_process_exit(process, 0.1)
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+
+

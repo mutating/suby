@@ -11,10 +11,11 @@ from emptylog import EmptyLogger, LoggerProtocol
 
 from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import RunningCommandError, WrongCommandError
+from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
 
-def run(  # noqa: PLR0913
+def run(  # noqa: PLR0913, PLR0915
     *arguments: Union[str, Path],
     catch_output: bool = False,
     catch_exceptions: bool = False,
@@ -29,6 +30,8 @@ def run(  # noqa: PLR0913
     """
     About reading from strout and stderr: https://stackoverflow.com/a/28319191/14522393
     """
+    use_event_driven_timeout = timeout is not None and isinstance(token, DefaultToken) and has_event_driven_wait()
+
     if timeout is not None and isinstance(token, DefaultToken):
         token = TimeoutToken(timeout)
     elif timeout is not None:
@@ -46,7 +49,9 @@ def run(  # noqa: PLR0913
     try:
         with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
             stderr_reading_thread = run_stderr_thread(process, stderr_buffer, catch_output, stderr_callback)
-            if not isinstance(token, DefaultToken):
+            if use_event_driven_timeout:
+                timeout_thread = run_timeout_thread(process, timeout, result)  # type: ignore[arg-type]
+            elif not isinstance(token, DefaultToken):
                 killing_thread = run_killing_thread(process, token, result)
 
             for line in process.stdout:  # type: ignore[union-attr]
@@ -55,7 +60,9 @@ def run(  # noqa: PLR0913
                     stdout_callback(line)
 
             stderr_reading_thread.join()
-            if not isinstance(token, DefaultToken):
+            if use_event_driven_timeout:
+                timeout_thread.join()
+            elif not isinstance(token, DefaultToken):
                 killing_thread.join()
 
     except FileNotFoundError as e:  # pragma: no cover
@@ -119,6 +126,12 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     return shlex_split(argument)
 
 
+def run_timeout_thread(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
+    thread = Thread(target=timeout_wait, args=(process, timeout, result))
+    thread.start()
+    return thread
+
+
 def run_killing_thread(process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
     thread = Thread(target=killing_loop, args=(process, token, result))
     thread.start()
@@ -140,6 +153,17 @@ def killing_loop(process: Popen, token: AbstractToken, result: SubprocessResult)
         if process.poll() is not None:
             break
         sleep(0.0001)
+
+
+def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> None:  # type: ignore[type-arg]
+    wait_for_process_exit(process, timeout)
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        else:
+            result.killed_by_token = True
 
 
 def read_stderr(process: Popen, stderr_buffer: List[str], catch_output: bool, stderr_callback: Callable[[str], Any]) -> None:  # type: ignore[type-arg]
