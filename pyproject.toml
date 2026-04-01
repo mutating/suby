@@ -12,7 +12,7 @@ description = 'Slightly simplified subprocesses'
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    'emptylog>=0.0.11',
+    'emptylog>=0.0.12',
     'cantok>=0.0.36',
 ]
 classifiers = [
