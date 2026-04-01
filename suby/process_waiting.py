@@ -9,7 +9,7 @@ _event_driven_waiter: Optional[Callable[[int, float], None]] = None
 
 if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
     def _wait_pidfd(pid: int, timeout_seconds: float) -> None:
-        fd = os.pidfd_open(pid)  # type: ignore[attr-defined]
+        fd = os.pidfd_open(pid)
         try:
             poller = select.poll()
             poller.register(fd, select.POLLIN)
@@ -19,7 +19,7 @@ if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
 
     _event_driven_waiter = _wait_pidfd
 
-elif hasattr(select, 'kqueue'):  # pragma: no cover
+elif sys.platform == 'darwin' and hasattr(select, 'kqueue'):  # pragma: no cover
     def _wait_kqueue(pid: int, timeout_seconds: float) -> None:
         kq = select.kqueue()
         try:
