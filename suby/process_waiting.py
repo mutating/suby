@@ -3,13 +3,15 @@ import select
 import subprocess
 import sys
 from subprocess import Popen
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 
 _event_driven_waiter: Optional[Callable[[int, float], None]] = None
 
 if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
+    pidfd_open = cast(Callable[[int], int], getattr(os, 'pidfd_open'))
+
     def _wait_pidfd(pid: int, timeout_seconds: float) -> None:
-        fd = os.pidfd_open(pid)
+        fd = pidfd_open(pid)
         try:
             poller = select.poll()
             poller.register(fd, select.POLLIN)

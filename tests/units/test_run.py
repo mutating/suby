@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -525,6 +526,11 @@ def test_wrong_command(command, exception_message):
         run(*command)
 
 
+def test_empty_command_raises_wrong_command_error():
+    with pytest.raises(WrongCommandError, match=match('You must pass at least one positional argument with the command to run.')):
+        run()
+
+
 def test_single_string_is_split_on_all_platforms():
     # Under the old Windows behavior, a single string was NOT split by shlex —
     # it was passed as one token to the subprocess, which would fail.
@@ -640,6 +646,91 @@ def test_run_returns_subprocess_result():
     assert isinstance(result, SubprocessResult)
 
 
+def test_missing_command_with_catch_exceptions_returns_filled_result():
+    result = run('command_that_definitely_does_not_exist_12345', catch_exceptions=True)
+
+    assert result.stdout == ''
+    assert result.stderr != ''
+    assert 'command_that_definitely_does_not_exist_12345' in result.stderr
+    assert result.returncode == 1
+    assert result.killed_by_token is False
+
+
+def test_missing_command_without_catch_exceptions_attaches_filled_result():
+    with pytest.raises(RunningCommandError) as exc_info:
+        run('command_that_definitely_does_not_exist_12345')
+
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr != ''
+    assert 'command_that_definitely_does_not_exist_12345' in exc_info.value.result.stderr
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
+def test_missing_command_with_catch_exceptions_logs_exception():
+    logger = MemoryLogger()
+
+    result = run('command_that_definitely_does_not_exist_12345', catch_exceptions=True, logger=logger)
+
+    assert result.returncode == 1
+    assert len(logger.data.info) == 1
+    assert len(logger.data.error) == 0
+    assert len(logger.data.exception) == 1
+    assert logger.data.info[0].message == 'The beginning of the execution of the command "command_that_definitely_does_not_exist_12345".'
+    assert logger.data.exception[0].message == 'Error when executing the command "command_that_definitely_does_not_exist_12345".'
+
+
+def test_missing_command_original_popen_raises_filenotfounderror():
+    with pytest.raises(RunningCommandError) as exc_info:
+        run('command_that_definitely_does_not_exist_12345')
+
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
+def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path):
+    script = tmp_path / 'script-without-shebang'
+    script.write_text('echo hello\n')
+    os.chmod(script, 0o755)
+
+    with pytest.raises(RunningCommandError) as exc_info:
+        run(str(script))
+
+    assert type(exc_info.value.__cause__) is OSError
+    assert 'Exec format error' in str(exc_info.value.__cause__)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
+def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
+    script = tmp_path / 'script.sh'
+    script.write_text('echo hello')
+    os.chmod(script, 0o644)
+
+    result = run(str(script), catch_exceptions=True)
+
+    assert result.stdout == ''
+    assert result.stderr != ''
+    assert 'Permission denied' in result.stderr
+    assert result.returncode == 1
+    assert result.killed_by_token is False
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
+def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_path):
+    script = tmp_path / 'script.sh'
+    script.write_text('echo hello')
+    os.chmod(script, 0o644)
+
+    with pytest.raises(RunningCommandError) as exc_info:
+        run(str(script))
+
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr != ''
+    assert 'Permission denied' in exc_info.value.result.stderr
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
 def test_catch_output_suppresses_stdout_callback():
     accumulator = []
 
@@ -721,6 +812,11 @@ def test_immediately_satisfied_condition_token_kills_process():
 def test_timeout_exception_message():
     with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(100)"', timeout=1)
+
+
+def test_negative_timeout_error_message():
+    with pytest.raises(ValueError, match=match('You cannot specify a timeout less than zero.')):
+        run('python -c "import time; time.sleep(100)"', timeout=-1)
 
 
 def test_large_output():

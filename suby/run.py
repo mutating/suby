@@ -38,6 +38,8 @@ def run(  # noqa: PLR0913, PLR0915
         token += TimeoutToken(timeout)
 
     converted_arguments = convert_arguments(arguments, split, double_backslash)
+    if not converted_arguments:
+        raise WrongCommandError('You must pass at least one positional argument with the command to run.')
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
     stdout_buffer: List[str] = []
@@ -65,11 +67,13 @@ def run(  # noqa: PLR0913, PLR0915
             elif not isinstance(token, DefaultToken):
                 killing_thread.join()
 
-    except FileNotFoundError as e:  # pragma: no cover
+    except OSError as e:  # pragma: no cover
+        fill_startup_failure_result(result, e)
         if not catch_exceptions:
             message = f'Error when executing the command "{arguments_string_representation}".'
             logger.exception(message)
             raise RunningCommandError(message, result) from e
+        logger.exception(f'Error when executing the command "{arguments_string_representation}".')
         return result
 
 
@@ -177,3 +181,9 @@ def fill_result(stdout_buffer: List[str], stderr_buffer: List[str], returncode: 
     result.stdout = ''.join(stdout_buffer)
     result.stderr = ''.join(stderr_buffer)
     result.returncode = returncode
+
+
+def fill_startup_failure_result(result: SubprocessResult, error: OSError) -> None:
+    result.stdout = ''
+    result.stderr = str(error)
+    result.returncode = 1

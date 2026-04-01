@@ -277,12 +277,14 @@ Under the hood, a separate thread is created to track the status of the token. W
 
 ## Timeouts
 
-You can set a timeout for `suby`. It must be a number greater than zero, which specifies the maximum number of seconds the subprocess is allowed to run. If the timeout expires before the subprocess completes, an exception will be raised:
+You can set a timeout for `suby`. It must be a number greater than or equal to zero, which specifies the maximum number of seconds the subprocess is allowed to run. If the timeout expires before the subprocess completes, an exception will be raised:
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
 # > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
 ```
+
+A timeout of `0` is valid and means that the subprocess will be canceled immediately if it has not already exited.
 
 Under the hood, `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library to track the timeout.
 
