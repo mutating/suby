@@ -5,11 +5,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from os import environ
 from pathlib import Path
+from threading import Thread
 from time import perf_counter
 
 import full_match
 import pytest
 from cantok import (
+    CancellationError,
     ConditionCancellationError,
     ConditionToken,
     SimpleToken,
@@ -17,7 +19,9 @@ from cantok import (
 )
 from emptylog import MemoryLogger
 
+import suby
 from suby import RunningCommandError, WrongCommandError, run
+from suby.subprocess_result import SubprocessResult
 
 
 @pytest.mark.parametrize(
@@ -628,3 +632,118 @@ def test_double_backslash_can_be_enabled_on_non_windows():
     )
     assert result.returncode == 0
     assert result.stdout.strip() == 'hello\\'
+
+
+def test_run_returns_subprocess_result():
+    result = run('python -c pass')
+
+    assert isinstance(result, SubprocessResult)
+
+
+def test_catch_output_suppresses_stdout_callback():
+    accumulator = []
+
+    run('python -c "print(\'kek\')"', catch_output=True, stdout_callback=lambda x: accumulator.append(x))
+
+    assert accumulator == []
+
+
+def test_catch_output_suppresses_stderr_callback():
+    accumulator = []
+
+    run('python -c "import sys; sys.stderr.write(\'kek\')"', catch_output=True, stderr_callback=lambda x: accumulator.append(x))
+
+    assert accumulator == []
+
+
+def test_multiple_strings_split_independently():
+    # 'python -c' splits to ['python', '-c'], '"print(777)"' splits to ['print(777)']
+    # each string is split independently and the results are concatenated
+    result = run('python -c', '"print(777)"', catch_output=True)
+
+    assert result.returncode == 0
+    assert result.stdout == '777\n'
+
+
+def test_argument_with_space_passed_with_split_false():
+    # with split=False the string is passed as-is, spaces are not treated as delimiters
+    result = run(
+        sys.executable,
+        '-c', 'import sys; print(sys.argv[1])',
+        'hello world',
+        split=False,
+        catch_output=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == 'hello world'
+
+
+def test_running_command_error_is_importable_from_suby():
+    assert hasattr(suby, 'RunningCommandError')
+
+
+def test_wrong_command_error_is_importable_from_suby():
+    assert hasattr(suby, 'WrongCommandError')
+
+
+def test_timeout_cancellation_error_is_importable_from_suby():
+    assert hasattr(suby, 'TimeoutCancellationError')
+
+
+def test_already_cancelled_simple_token_kills_process():
+    token = SimpleToken()
+    token.cancel()
+
+    result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
+
+    assert result.killed_by_token == True
+    assert result.returncode != 0
+
+
+def test_already_cancelled_simple_token_raises():
+    token = SimpleToken()
+    token.cancel()
+
+    with pytest.raises(CancellationError):
+        run('python -c "import time; time.sleep(100)"', token=token)
+
+
+def test_immediately_satisfied_condition_token_kills_process():
+    token = ConditionToken(lambda: True)
+
+    result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
+
+    assert result.killed_by_token == True
+    assert result.returncode != 0
+
+
+def test_timeout_exception_message():
+    with pytest.raises(TimeoutCancellationError, match=full_match('The timeout of 1 seconds has expired.')):
+        run('python -c "import time; time.sleep(100)"', timeout=1)
+
+
+def test_large_output():
+    lines = 1000
+
+    result = run(f'python -c "for i in range({lines}): print(i)"', catch_output=True)
+
+    assert result.returncode == 0
+    assert result.stdout == ''.join(f'{i}\n' for i in range(lines))
+
+
+def test_parallel_runs():
+    results = [None] * 5
+
+    def run_task(i: int) -> None:
+        results[i] = run(f'python -c "print({i})"', catch_output=True)
+
+    threads = [Thread(target=run_task, args=(i,)) for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    for i, result in enumerate(results):
+        assert result.returncode == 0
+        assert result.stdout == f'{i}\n'
