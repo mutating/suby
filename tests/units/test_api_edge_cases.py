@@ -654,53 +654,69 @@ def test_timeout_and_stderr_callback_error_raise_one_of_expected_exceptions() ->
 
 
 def test_timeout_and_stdout_callback_error_after_near_exit_raise_one_of_expected_exceptions() -> None:
-    def stdout_callback(_: str) -> None:
-        time.sleep(0.1)
-        raise RuntimeError('stdout callback exploded after near-exit')
+    returncodes = []
+    killed_flags = []
 
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; print("hello", flush=True); time.sleep(0.05)',
-            split=False,
-            stdout_callback=stdout_callback,
-            timeout=0.02,
-        )
-    elapsed = time.perf_counter() - start
+    for _ in range(5):
+        def stdout_callback(_: str) -> None:
+            time.sleep(0.1)
+            raise RuntimeError('stdout callback exploded after near-exit')
 
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-    assert isinstance(result, SubprocessResult)
-    assert result.stdout == 'hello\n'
-    assert isinstance(result.stderr, str)
-    assert isinstance(result.returncode, int)
+        start = time.perf_counter()
+        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; print("hello", flush=True); time.sleep(0.05)',
+                split=False,
+                stdout_callback=stdout_callback,
+                timeout=0.02,
+            )
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2
+        result = cast(Any, exc_info.value).result
+        assert isinstance(result, SubprocessResult)
+        assert result.stdout == 'hello\n'
+        assert isinstance(result.stderr, str)
+        returncodes.append(result.returncode)
+        killed_flags.append(result.killed_by_token)
+
+    assert returncodes == [-9, -9, -9, -9, -9]
+    assert killed_flags == [True, True, True, True, True]
 
 
 def test_timeout_and_stderr_callback_error_after_near_exit_raise_one_of_expected_exceptions() -> None:
-    def stderr_callback(_: str) -> None:
-        time.sleep(0.1)
-        raise RuntimeError('stderr callback exploded after near-exit')
+    returncodes = []
+    killed_flags = []
 
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(0.05)',
-            split=False,
-            stderr_callback=stderr_callback,
-            timeout=0.02,
-        )
-    elapsed = time.perf_counter() - start
+    for _ in range(5):
+        def stderr_callback(_: str) -> None:
+            time.sleep(0.1)
+            raise RuntimeError('stderr callback exploded after near-exit')
 
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-    assert isinstance(result, SubprocessResult)
-    assert isinstance(result.stdout, str)
-    assert result.stderr == 'hello\n'
-    assert isinstance(result.returncode, int)
+        start = time.perf_counter()
+        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(0.05)',
+                split=False,
+                stderr_callback=stderr_callback,
+                timeout=0.02,
+            )
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2
+        result = cast(Any, exc_info.value).result
+        assert isinstance(result, SubprocessResult)
+        assert isinstance(result.stdout, str)
+        assert result.stderr == 'hello\n'
+        returncodes.append(result.returncode)
+        killed_flags.append(result.killed_by_token)
+
+    assert returncodes == [-9, -9, -9, -9, -9]
+    assert killed_flags == [True, True, True, True, True]
 
 
 def test_process_exit_and_stdout_last_line_callback_failure_raise_callback_error() -> None:

@@ -262,6 +262,8 @@ If a token exception has already been recorded before the timeout path wins the 
 
 In timeout-versus-callback races, whether the callback comes from `stdout` or `stderr`, the attached `result.killed_by_token` flag may be either `True` or `False`, depending on whether the timeout path marked the result before the callback failure path was handled.
 
+If a timeout and a callback error happen almost at the same time, the exception you catch and the attached `result` may describe different parts of that race. For example, `suby` may re-raise the callback exception, but the attached `result` may still show that the subprocess was stopped by the timeout. This depends on timing.
+
 </details>
 
 
