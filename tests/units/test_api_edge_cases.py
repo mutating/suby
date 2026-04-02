@@ -490,6 +490,56 @@ def test_timeout_and_stderr_callback_error_raise_one_of_expected_exceptions() ->
     assert isinstance(result.returncode, int)
 
 
+def test_timeout_and_stdout_callback_error_after_near_exit_raise_one_of_expected_exceptions() -> None:
+    def stdout_callback(_: str) -> None:
+        time.sleep(0.1)
+        raise RuntimeError('stdout callback exploded after near-exit')
+
+    start = time.perf_counter()
+    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("hello", flush=True); time.sleep(0.05)',
+            split=False,
+            stdout_callback=stdout_callback,
+            timeout=0.02,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    result = cast(Any, exc_info.value).result
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == 'hello\n'
+    assert isinstance(result.stderr, str)
+    assert isinstance(result.returncode, int)
+
+
+def test_timeout_and_stderr_callback_error_after_near_exit_raise_one_of_expected_exceptions() -> None:
+    def stderr_callback(_: str) -> None:
+        time.sleep(0.1)
+        raise RuntimeError('stderr callback exploded after near-exit')
+
+    start = time.perf_counter()
+    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(0.05)',
+            split=False,
+            stderr_callback=stderr_callback,
+            timeout=0.02,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    result = cast(Any, exc_info.value).result
+    assert isinstance(result, SubprocessResult)
+    assert isinstance(result.stdout, str)
+    assert result.stderr == 'hello\n'
+    assert isinstance(result.returncode, int)
+
+
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten() -> None:
     preserved_result = SubprocessResult()
     preserved_result.stdout = 'preserved'
