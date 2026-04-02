@@ -39,6 +39,7 @@ def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
     """Load a fresh process_waiting module as if it were imported on Linux with pidfd support."""
     module_path = Path(process_waiting.__file__)
     spec = importlib.util.spec_from_file_location('test_process_waiting_linux_pidfd', module_path)
+
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -48,10 +49,6 @@ def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
         spec.loader.exec_module(module)
 
     return module
-
-
-# --- A. Tests for suby/process_waiting.py ---
-
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
 def test_event_driven_detects_already_exited_process():
@@ -66,6 +63,7 @@ def test_event_driven_detects_already_exited_process():
     elapsed = monotonic() - start
 
     process.wait()
+
     assert elapsed < 2.0
 
 
@@ -83,6 +81,7 @@ def test_event_driven_wakes_on_process_exit():
     elapsed = monotonic() - start
 
     process.wait()
+
     assert elapsed < 2.0
 
 
@@ -95,6 +94,7 @@ def test_timeout_expiry_process_still_running():
     )
     try:
         wait_for_process_exit(process, 0.1)
+
         assert process.poll() is None
     finally:
         process.kill()
@@ -114,6 +114,7 @@ def test_wait_for_process_exit_without_timeout_waits_until_process_finishes():
     elapsed = monotonic() - start
 
     process.wait()
+
     assert process.poll() is not None
     assert elapsed < 2.0
 
@@ -163,6 +164,7 @@ def test_fd_cleanup_no_leaks():
         process.wait()
 
     fd_count_after = len(list(os.scandir(f'/proc/{os.getpid()}/fd')))
+
     assert fd_count_after <= fd_count_before + 5
 
 
@@ -187,6 +189,7 @@ def test_concurrent_calls_thread_safety():
             t.start()
         for t in threads:
             t.join()
+
         assert len(errors) == 0
     finally:
         process.kill()
@@ -205,6 +208,7 @@ def test_wait_kqueue_direct():
     )
     try:
         _wait_kqueue(process.pid, 0.01)
+
         assert process.poll() is None
     finally:
         process.kill()
@@ -258,6 +262,7 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
     try:
         with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
             wait_for_process_exit(process, None)
+
         assert process.poll() is not None
     finally:
         process.wait()
@@ -275,6 +280,7 @@ def test_wait_pidfd_direct():
     )
     try:
         _wait_pidfd(process.pid, 0.01)
+
         assert process.poll() is None
     finally:
         process.kill()
@@ -350,16 +356,13 @@ def test_wait_pidfd_direct_without_timeout_waits_until_process_finishes():
         elapsed = monotonic() - start
 
         process.wait()
+
         assert process.poll() is not None
         assert elapsed < 2.0
     finally:
         if process.poll() is None:
             process.kill()
         process.wait()
-
-
-# --- B. Tests for timeout-only path (timeout_wait) ---
-
 
 def test_timeout_kills_long_running_process():
     """Timeout-only path kills the process and raises TimeoutCancellationError."""
@@ -370,6 +373,7 @@ def test_timeout_kills_long_running_process():
 def test_process_exits_before_timeout():
     """When process exits before timeout, no exception is raised and output is captured."""
     result = run(_PRINT_CMD, timeout=10, catch_output=True)
+
     assert result.stdout == 'hello\n'
     assert result.returncode == 0
     assert result.killed_by_token is False
@@ -384,6 +388,7 @@ def test_very_short_timeout():
 def test_timeout_with_catch_exceptions():
     """With catch_exceptions=True, timeout doesn't raise but result reflects the kill."""
     result = run(_SLEEP_CMD, timeout=0.5, catch_exceptions=True)
+
     assert result.killed_by_token is True
     assert result.returncode != 0
     assert result.stdout == ''
@@ -416,15 +421,12 @@ def test_event_driven_fast_process_exit_detection():
     assert result.returncode == 0
     assert elapsed < 2.0
 
-
-# --- C. Tests verifying new mechanism is NOT used when it shouldn't be ---
-
-
 def test_token_only_uses_process_waiter_thread():
     """When only a token is passed, process exit is still tracked by the waiter thread."""
     with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter:
         result = run(_PRINT_CMD, token=SimpleToken(), catch_output=True)
         mock_waiter.assert_called_once()
+
     assert result.stdout == 'hello\n'
 
 
@@ -445,11 +447,8 @@ def test_no_timeout_no_token_uses_process_waiter_thread():
         mock_waiter.assert_called_once()
         mock_stdout_thread.assert_called_once()
         mock_stderr_thread.assert_called_once()
+
     assert result.stdout == 'hello\n'
-
-
-# --- E. Edge cases ---
-
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='No SIGTERM on Windows')
 def test_process_killed_by_signal_during_wait():
@@ -473,6 +472,7 @@ def test_process_killed_by_signal_during_wait():
     t.join()
 
     process.wait()
+
     assert elapsed < 2.0
 
 
@@ -480,6 +480,7 @@ def test_rapid_sequential_timeout_calls():
     """Rapid sequential calls with timeout don't leak resources."""
     for _ in range(10):
         result = run(_PASS_CMD, timeout=1, catch_output=True)
+
         assert result.returncode == 0
 
 
@@ -513,6 +514,7 @@ def test_timeout_raises_timeout_cancellation_error_with_result():
     """TimeoutCancellationError carries the result object with correct fields."""
     with pytest.raises(TimeoutCancellationError) as exc_info:
         run(_SLEEP_CMD, timeout=0.5)
+
     assert hasattr(exc_info.value, 'result')
     assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
@@ -534,6 +536,7 @@ def test_oserror_fallback_returns_promptly_on_exit():
         elapsed = monotonic() - start
 
     process.wait()
+
     assert elapsed < 2.0
 
 
@@ -547,6 +550,7 @@ def test_oserror_fallback_with_timeout_expiry():
     try:
         with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
             wait_for_process_exit(process, 0.1)
+
         assert process.poll() is None
     finally:
         process.kill()
@@ -563,6 +567,7 @@ def test_wait_for_process_exit_without_event_driven_waiter():
     try:
         with patch('suby.process_waiting._event_driven_waiter', None):
             wait_for_process_exit(process, 0.1)
+
         assert process.poll() is None
     finally:
         process.kill()

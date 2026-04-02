@@ -94,7 +94,7 @@ def test_double_backslash_can_be_enabled_on_non_windows():
 def test_stdout_callback_replaces_default_output():
     collected = []
 
-    def my_new_stdout(string: str) -> None:
+    def my_new_stdout(string: str):
         collected.append(string)
 
     stderr_buffer = StringIO()

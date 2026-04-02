@@ -4,20 +4,24 @@ from suby.subprocess_result import SubprocessResult
 
 
 def test_auto_id():
+
     assert SubprocessResult().id != SubprocessResult().id
     assert isinstance(SubprocessResult().id, str)
     assert len(SubprocessResult().id) > 10
 
 
 def test_id_has_no_dashes():
+
     assert '-' not in SubprocessResult().id
 
 
 def test_id_length_is_32():
+
     assert len(SubprocessResult().id) == 32
 
 
 def test_default_values():
+
     assert SubprocessResult().stdout is None
     assert SubprocessResult().stderr is None
     assert SubprocessResult().returncode is None

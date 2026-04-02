@@ -126,6 +126,7 @@ def test_timeout_without_catching_exception(command):
     with pytest.raises(TimeoutCancellationError) as exc_info:
         run(*command, timeout=timeout)
     end_time = perf_counter()
+
     assert exc_info.value.result.stdout == ''
     assert exc_info.value.result.stderr == ''
     assert exc_info.value.result.returncode != 0
@@ -147,6 +148,7 @@ def test_exception_in_subprocess_without_catching(command, error_text):
 
     with pytest.raises(RunningCommandError) as exc_info:
         run(*command)
+
     assert exc_info.value.result.stdout == ''
     assert 'ValueError' in exc_info.value.result.stderr
     assert exc_info.value.result.returncode != 0
@@ -339,6 +341,7 @@ def test_only_token_without_catching(command):
 
     with pytest.raises(ConditionCancellationError) as exc_info:
         run(*command, token=token)
+
     assert exc_info.value.token is token
     result = exc_info.value.result
 
@@ -370,6 +373,7 @@ def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
 
     with pytest.raises(ConditionCancellationError) as exc_info:
         run(*command, token=token, timeout=3)
+
     assert exc_info.value.token is token
     result = exc_info.value.result
 
@@ -401,6 +405,7 @@ def test_token_plus_timeout_but_timeout_is_less_without_catching(command):
 
     with pytest.raises(TimeoutCancellationError) as exc_info:
         run(*command, token=token, timeout=timeout/2)
+
     assert exc_info.value.token is not token
     result = exc_info.value.result
 
@@ -535,6 +540,7 @@ def test_single_string_is_split_on_all_platforms():
     # it was passed as one token to the subprocess, which would fail.
     # This test verifies that shlex splitting works on all platforms.
     result = run('python -c pass')
+
     assert result.returncode == 0
     assert result.stdout == ''
     assert result.stderr == ''
@@ -555,6 +561,7 @@ def test_executable_path_with_backslashes_passed_as_string():
     # shlex with posix=True treats \ as an escape character, silently eating backslashes.
     # This test verifies that backslashes in paths survive shlex splitting.
     result = run(sys.executable, '-c pass')
+
     assert result.returncode == 0
 
 
@@ -598,6 +605,7 @@ def test_double_backslash_enabled_by_default_on_windows():
     # sys.executable on Windows is a path like C:\Python\python.exe.
     # With double_backslash=True (the default on Windows), backslashes survive shlex splitting.
     result = run(f'{sys.executable} -c "print(\'kek\')"', catch_output=True)
+
     assert result.returncode == 0
     assert result.stdout == 'kek\n'
 
@@ -620,6 +628,7 @@ def test_double_backslash_disabled_by_default_on_non_windows():
         r'hello\ world',
         catch_output=True,
     )
+
     assert result.returncode == 0
     assert result.stdout.strip() == 'hello world'
 
@@ -635,6 +644,7 @@ def test_double_backslash_can_be_enabled_on_non_windows():
         double_backslash=True,
         catch_output=True,
     )
+
     assert result.returncode == 0
     assert result.stdout.strip() == 'hello\\'
 
@@ -770,14 +780,17 @@ def test_argument_with_space_passed_with_split_false():
 
 
 def test_running_command_error_is_importable_from_suby():
+
     assert hasattr(suby, 'RunningCommandError')
 
 
 def test_wrong_command_error_is_importable_from_suby():
+
     assert hasattr(suby, 'WrongCommandError')
 
 
 def test_timeout_cancellation_error_is_importable_from_suby():
+
     assert hasattr(suby, 'TimeoutCancellationError')
 
 
@@ -830,7 +843,7 @@ def test_large_output():
 def test_parallel_runs():
     results = [None] * 5
 
-    def run_task(i: int) -> None:
+    def run_task(i: int):
         results[i] = run(f'python -c "print({i})"', catch_output=True)
 
     threads = [Thread(target=run_task, args=(i,)) for i in range(5)]
@@ -840,5 +853,6 @@ def test_parallel_runs():
         t.join()
 
     for i, result in enumerate(results):
+
         assert result.returncode == 0
         assert result.stdout == f'{i}\n'
