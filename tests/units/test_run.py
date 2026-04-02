@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -691,7 +690,7 @@ def test_missing_command_original_popen_raises_filenotfounderror():
 def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path):
     script = tmp_path / 'script-without-shebang'
     script.write_text('echo hello\n')
-    os.chmod(script, 0o755)
+    script.chmod(0o755)
 
     with pytest.raises(RunningCommandError) as exc_info:
         run(str(script))
@@ -704,7 +703,7 @@ def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path):
 def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
     script = tmp_path / 'script.sh'
     script.write_text('echo hello')
-    os.chmod(script, 0o644)
+    script.chmod(0o644)
 
     result = run(str(script), catch_exceptions=True)
 
@@ -719,7 +718,7 @@ def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
 def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_path):
     script = tmp_path / 'script.sh'
     script.write_text('echo hello')
-    os.chmod(script, 0o644)
+    script.chmod(0o644)
 
     with pytest.raises(RunningCommandError) as exc_info:
         run(str(script))

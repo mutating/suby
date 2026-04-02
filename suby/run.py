@@ -1,10 +1,12 @@
+from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
-from threading import Thread
+from threading import Lock, Thread
 from time import sleep
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import IO, Any, Callable, List, Optional, Tuple, Union
 
 from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
 from emptylog import EmptyLogger, LoggerProtocol
@@ -13,6 +15,31 @@ from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import RunningCommandError, WrongCommandError
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
+
+
+class _FailureState:
+    def __init__(self) -> None:
+        self.error: Optional[Exception] = None
+        self._lock = Lock()
+
+    def set(self, error: Exception) -> None:
+        with self._lock:
+            if self.error is None:
+                self.error = error
+
+
+@dataclass
+class _ExecutionState:
+    stdout_buffer: List[str] = field(default_factory=list)
+    stderr_buffer: List[str] = field(default_factory=list)
+    result: SubprocessResult = field(default_factory=SubprocessResult)
+    failure_state: _FailureState = field(default_factory=_FailureState)
+
+
+@dataclass
+class _ReaderThreads:
+    stdout: Thread
+    stderr: Thread
 
 
 def run(  # noqa: PLR0913, PLR0915
@@ -30,6 +57,7 @@ def run(  # noqa: PLR0913, PLR0915
     """
     About reading from strout and stderr: https://stackoverflow.com/a/28319191/14522393
     """
+    validate_timeout(timeout)
     use_event_driven_timeout = timeout is not None and isinstance(token, DefaultToken) and has_event_driven_wait()
 
     if timeout is not None and isinstance(token, DefaultToken):
@@ -42,57 +70,63 @@ def run(  # noqa: PLR0913, PLR0915
         raise WrongCommandError('You must pass at least one positional argument with the command to run.')
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
 
-    stdout_buffer: List[str] = []
-    stderr_buffer: List[str] = []
-    result = SubprocessResult()
+    state = _ExecutionState()
 
     logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
     try:
         with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
-            stderr_reading_thread = run_stderr_thread(process, stderr_buffer, catch_output, stderr_callback)
+            reader_threads = _ReaderThreads(
+                stdout=run_stdout_thread(process, catch_output, stdout_callback, token, state),
+                stderr=run_stderr_thread(process, catch_output, stderr_callback, token, state),
+            )
             if use_event_driven_timeout:
-                timeout_thread = run_timeout_thread(process, timeout, result)  # type: ignore[arg-type]
-            elif not isinstance(token, DefaultToken):
-                killing_thread = run_killing_thread(process, token, result)
+                timeout_thread = run_timeout_thread(process, timeout, state.result)  # type: ignore[arg-type]
 
-            for line in process.stdout:  # type: ignore[union-attr]
-                stdout_buffer.append(line)
-                if not catch_output:
-                    stdout_callback(line)
+            while True:
+                raise_failure_if_needed(process, reader_threads, state)
+                if not use_event_driven_timeout and not isinstance(token, DefaultToken):
+                    try:
+                        if not token:
+                            kill_process_if_running(process)
+                            state.result.killed_by_token = True
+                    except Exception as error:  # noqa: BLE001
+                        state.failure_state.set(error)
+                        raise_failure_if_needed(process, reader_threads, state)
+                if process.poll() is not None:
+                    break
+                sleep(0.0001)
 
-            stderr_reading_thread.join()
+            join_reader_threads(reader_threads)
+            raise_failure_if_needed(process, reader_threads, state)
             if use_event_driven_timeout:
                 timeout_thread.join()
-            elif not isinstance(token, DefaultToken):
-                killing_thread.join()
 
     except OSError as e:  # pragma: no cover
-        fill_startup_failure_result(result, e)
+        fill_startup_failure_result(state.result, e)
         if not catch_exceptions:
             message = f'Error when executing the command "{arguments_string_representation}".'
             logger.exception(message)
-            raise RunningCommandError(message, result) from e
+            raise RunningCommandError(message, state.result) from e
         logger.exception(f'Error when executing the command "{arguments_string_representation}".')
-        return result
+        return state.result
 
-
-    fill_result(stdout_buffer, stderr_buffer, process.returncode, result)
+    fill_result(state, process.returncode)
 
     if process.returncode != 0:
         if not catch_exceptions:
-            if result.killed_by_token:
+            if state.result.killed_by_token:
                 logger.error(f'The execution of the "{arguments_string_representation}" command was canceled using a cancellation token.')
                 try:
                     token.check()
                 except CancellationError as e:
-                    e.result = result  # type: ignore[attr-defined]
+                    e.result = state.result  # type: ignore[attr-defined]
                     raise
             else:
                 message = f'Error when executing the command "{arguments_string_representation}".'
                 logger.error(message)
-                raise RunningCommandError(message, result)
-        elif result.killed_by_token:
+                raise RunningCommandError(message, state.result)
+        elif state.result.killed_by_token:
             logger.error(f'The execution of the "{arguments_string_representation}" command was canceled using a cancellation token.')
         else:
             logger.error(f'Error when executing the command "{arguments_string_representation}".')
@@ -100,7 +134,7 @@ def run(  # noqa: PLR0913, PLR0915
     else:
         logger.info(f'The command "{arguments_string_representation}" has been successfully executed.')
 
-    return result
+    return state.result
 
 
 def convert_arguments(arguments: Tuple[Union[str, Path], ...], split: bool, double_backslash: bool) -> List[str]:
@@ -136,27 +170,16 @@ def run_timeout_thread(process: Popen, timeout: Union[int, float], result: Subpr
     return thread
 
 
-def run_killing_thread(process: Popen, token: AbstractToken, result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
-    thread = Thread(target=killing_loop, args=(process, token, result))
+def run_stdout_thread(process: Popen, catch_output: bool, stdout_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
+    thread = Thread(target=read_stream, args=(process, process.stdout, state.stdout_buffer, catch_output, stdout_callback, token, state))
     thread.start()
     return thread
 
 
-def run_stderr_thread(process: Popen, stderr_buffer: List[str], catch_output: bool, stderr_callback: Callable[[str], Any]) -> Thread:  # type: ignore[type-arg]
-    thread = Thread(target=read_stderr, args=(process, stderr_buffer, catch_output, stderr_callback))
+def run_stderr_thread(process: Popen, catch_output: bool, stderr_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
+    thread = Thread(target=read_stream, args=(process, process.stderr, state.stderr_buffer, catch_output, stderr_callback, token, state))
     thread.start()
     return thread
-
-
-def killing_loop(process: Popen, token: AbstractToken, result: SubprocessResult) -> None:  # type: ignore[type-arg]
-    while True:
-        if not token:
-            process.kill()
-            result.killed_by_token = True
-            break
-        if process.poll() is not None:
-            break
-        sleep(0.0001)
 
 
 def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> None:  # type: ignore[type-arg]
@@ -170,20 +193,91 @@ def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessR
             result.killed_by_token = True
 
 
-def read_stderr(process: Popen, stderr_buffer: List[str], catch_output: bool, stderr_callback: Callable[[str], Any]) -> None:  # type: ignore[type-arg]
-    for line in process.stderr:  # type: ignore[union-attr]
-        stderr_buffer.append(line)
-        if not catch_output:
-            stderr_callback(line)
+def read_stream(  # noqa: PLR0913
+    process: Popen[str],
+    stream: Optional[IO[str]],
+    buffer: List[str],
+    catch_output: bool,
+    callback: Callable[[str], Any],
+    token: AbstractToken,
+    state: _ExecutionState,
+) -> None:
+    if stream is None:
+        return
+    while True:
+        if state.failure_state.error is not None:
+            break
+        try:
+            if not isinstance(token, DefaultToken) and not token:
+                kill_process_if_running(process)
+                state.result.killed_by_token = True
+                break
+            line = stream.readline()
+            if line == '':
+                break
+            buffer.append(line)
+            if not catch_output:
+                callback(line)
+        except Exception as error:  # noqa: BLE001
+            state.failure_state.set(error)
+            break
 
 
-def fill_result(stdout_buffer: List[str], stderr_buffer: List[str], returncode: int, result: SubprocessResult) -> None:
-    result.stdout = ''.join(stdout_buffer)
-    result.stderr = ''.join(stderr_buffer)
-    result.returncode = returncode
+def fill_result(state: _ExecutionState, returncode: int) -> None:
+    state.result.stdout = ''.join(state.stdout_buffer)
+    state.result.stderr = ''.join(state.stderr_buffer)
+    state.result.returncode = returncode
 
 
 def fill_startup_failure_result(result: SubprocessResult, error: OSError) -> None:
     result.stdout = ''
     result.stderr = str(error)
     result.returncode = 1
+
+
+def validate_timeout(timeout: Optional[Union[int, float]]) -> None:
+    if timeout is None:
+        return
+    if not isfinite(timeout):
+        raise ValueError('You cannot specify NaN or infinite timeout values.')
+
+
+def raise_failure_if_needed(process: Popen[str], reader_threads: _ReaderThreads, state: _ExecutionState) -> None:
+    if state.failure_state.error is None:
+        return
+    raise_background_failure(process, reader_threads, state, state.failure_state.error)
+
+
+def raise_background_failure(process: Popen[str], reader_threads: _ReaderThreads, state: _ExecutionState, error: Exception) -> None:
+    kill_process_if_running(process)
+    join_reader_threads(reader_threads)
+    try:
+        process.wait()
+    except OSError:
+        pass
+    fill_result(state, process.returncode if process.returncode is not None else 1)
+    attach_result_to_exception(error, state.result)
+    raise error
+
+
+def join_reader_threads(reader_threads: _ReaderThreads) -> None:
+    reader_threads.stdout.join()
+    reader_threads.stderr.join()
+
+
+def kill_process_if_running(process: Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def attach_result_to_exception(error: BaseException, result: SubprocessResult) -> None:
+    try:
+        if hasattr(error, 'result'):
+            return
+        error.result = result  # type: ignore[attr-defined]
+    except (AttributeError, TypeError):
+        pass

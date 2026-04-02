@@ -257,10 +257,12 @@ def test_token_plus_timeout_does_not_use_event_driven():
 def test_no_timeout_no_token_does_not_use_event_driven():
     """When neither timeout nor token is passed, no killing mechanism is started."""
     with patch.object(_run_module, 'wait_for_process_exit') as mock_wait, \
-         patch.object(_run_module, 'killing_loop') as mock_killing:
+         patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as mock_stdout_thread, \
+         patch.object(_run_module, 'run_stderr_thread', wraps=_run_module.run_stderr_thread) as mock_stderr_thread:
         result = run(_PRINT_CMD, catch_output=True)
         mock_wait.assert_not_called()
-        mock_killing.assert_not_called()
+        mock_stdout_thread.assert_called_once()
+        mock_stderr_thread.assert_called_once()
     assert result.stdout == 'hello\n'
 
 
@@ -383,5 +385,4 @@ def test_wait_for_process_exit_without_event_driven_waiter():
     finally:
         process.kill()
         process.wait()
-
 

@@ -142,7 +142,7 @@ Note that this only affects string arguments that go through `shlex` splitting. 
 
 ## Output
 
-By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output is flushed each time a full line is read. For continuous reading from `stderr`, a separate thread is created so that `stdout` and `stderr` are read independently.
+By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output is flushed each time a full line is read. `suby` reads `stdout` and `stderr` in separate threads so that neither stream blocks the other.
 
 You can override the output functions for `stdout` and `stderr`. To do this, you need to pass functions accepting a string as an argument via the `stdout_callback` and `stderr_callback` parameters, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
@@ -165,6 +165,13 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 ```
 
 If you specify `catch_output=True`, even if you have also defined custom callback functions, they will not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the buffering of output.
+
+<details>
+  <summary>Notes about concurrent output</summary>
+
+When the subprocess is canceled or interrupted because a callback raises an exception, the collected `stdout` and `stderr` may contain only the output that was read before termination. If both streams are active at the same time, some trailing output may or may not be captured depending on timing.
+
+</details>
 
 
 ## Logging
@@ -240,6 +247,17 @@ except TimeoutCancellationError as e:
     # > SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
+<details>
+  <summary>Notes about callback and token errors</summary>
+
+If a custom `stdout_callback`, `stderr_callback`, or cancellation token raises its own exception, `suby` re-raises that exception and attaches the current `SubprocessResult` to its `result` attribute. The captured output may be partial.
+
+If multiple failures happen concurrently, for example both callbacks raise at nearly the same time, `suby` raises the first one it observes. Which one that is may depend on timing.
+
+If a callback raises after the subprocess has already exited, the exception is still propagated, but the attached `result` may contain a successful `returncode`.
+
+</details>
+
 
 ## Working with Cancellation Tokens
 
@@ -266,7 +284,7 @@ print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exce
 # > SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-Under the hood, a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
+Under the hood, token state is checked while `stdout` and `stderr` are being read. When the token is canceled, the subprocess is killed.
 
 ## Timeouts
 
