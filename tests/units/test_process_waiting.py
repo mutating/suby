@@ -1,9 +1,12 @@
 import importlib
+import importlib.util
 import os
+import select
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 from threading import Thread
 from time import monotonic
 from unittest.mock import MagicMock, patch
@@ -30,6 +33,21 @@ _SLEEP_CMD = f'{sys.executable} -c "import time; time.sleep(1000)"'
 _SHORT_SLEEP_CMD = f'{sys.executable} -c "import time; time.sleep(0.1)"'
 _PRINT_CMD = f'{sys.executable} -c "print(\'hello\')"'
 _PASS_CMD = f'{sys.executable} -c pass'
+
+
+def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
+    """Load a fresh process_waiting module as if it were imported on Linux with pidfd support."""
+    module_path = Path(process_waiting.__file__)
+    spec = importlib.util.spec_from_file_location('test_process_waiting_linux_pidfd', module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    with patch.object(sys, 'platform', 'linux'), \
+         patch.object(os, 'pidfd_open', pidfd_open, create=True):
+        spec.loader.exec_module(module)
+
+    return module
 
 
 # --- A. Tests for suby/process_waiting.py ---
@@ -260,6 +278,83 @@ def test_wait_pidfd_direct():
         assert process.poll() is None
     finally:
         process.kill()
+        process.wait()
+
+
+def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
+    """The Linux pidfd waiter opens a pidfd, registers it with poll, converts timeout to ms, and closes it."""
+    poller = MagicMock()
+    poll_factory = MagicMock(return_value=poller)
+    pidfd_open = MagicMock(return_value=123)
+    close = MagicMock()
+
+    module = _load_linux_pidfd_process_waiting(pidfd_open)
+
+    with patch.object(module.select, 'poll', poll_factory), patch.object(module.os, 'close', close):
+        module._wait_pidfd(456, 0.5)
+
+    pidfd_open.assert_called_once_with(456)
+    poll_factory.assert_called_once_with()
+    poller.register.assert_called_once_with(123, select.POLLIN)
+    poller.poll.assert_called_once_with(500.0)
+    close.assert_called_once_with(123)
+
+
+def test_simulated_linux_pidfd_wait_passes_none_timeout_and_closes_fd():
+    """The Linux pidfd waiter passes None through to poll() and still closes the pidfd."""
+    poller = MagicMock()
+    poll_factory = MagicMock(return_value=poller)
+    pidfd_open = MagicMock(return_value=123)
+    close = MagicMock()
+
+    module = _load_linux_pidfd_process_waiting(pidfd_open)
+
+    with patch.object(module.select, 'poll', poll_factory), patch.object(module.os, 'close', close):
+        module._wait_pidfd(456, None)
+
+    poller.poll.assert_called_once_with(None)
+    close.assert_called_once_with(123)
+
+
+def test_simulated_linux_pidfd_wait_closes_fd_when_poll_raises():
+    """The Linux pidfd waiter closes the pidfd even if poll() raises an OSError."""
+    poller = MagicMock()
+    poller.poll.side_effect = OSError('mocked poll failure')
+    poll_factory = MagicMock(return_value=poller)
+    pidfd_open = MagicMock(return_value=123)
+    close = MagicMock()
+
+    module = _load_linux_pidfd_process_waiting(pidfd_open)
+
+    with patch.object(module.select, 'poll', poll_factory), \
+         patch.object(module.os, 'close', close), \
+         pytest.raises(OSError, match='mocked poll failure'):
+        module._wait_pidfd(456, 0.5)
+
+    close.assert_called_once_with(123)
+
+
+@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
+def test_wait_pidfd_direct_without_timeout_waits_until_process_finishes():
+    """Direct pidfd waiting with None timeout blocks until a short-lived process exits."""
+    from suby.process_waiting import _wait_pidfd  # noqa: PLC0415
+
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(0.1)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        start = monotonic()
+        _wait_pidfd(process.pid, None)
+        elapsed = monotonic() - start
+
+        process.wait()
+        assert process.poll() is not None
+        assert elapsed < 2.0
+    finally:
+        if process.poll() is None:
+            process.kill()
         process.wait()
 
 
