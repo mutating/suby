@@ -83,6 +83,23 @@ def test_timeout_expiry_process_still_running():
         process.wait()
 
 
+def test_wait_for_process_exit_without_timeout_waits_until_process_finishes():
+    """A None timeout blocks until the process exits."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(0.1)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    start = monotonic()
+    wait_for_process_exit(process, None)
+    elapsed = monotonic() - start
+
+    process.wait()
+    assert process.poll() is not None
+    assert elapsed < 2.0
+
+
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven waiter to trigger OSError from')
 def test_oserror_fallback_with_reaped_pid():
     """When event-driven waiter gets OSError (reaped PID), falls back gracefully without raising."""
@@ -238,29 +255,29 @@ def test_event_driven_fast_process_exit_detection():
 # --- C. Tests verifying new mechanism is NOT used when it shouldn't be ---
 
 
-def test_token_only_does_not_use_event_driven():
-    """When only a token is passed (no timeout), wait_for_process_exit is not called."""
-    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait:
+def test_token_only_uses_process_waiter_thread():
+    """When only a token is passed, process exit is still tracked by the waiter thread."""
+    with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter:
         result = run(_PRINT_CMD, token=SimpleToken(), catch_output=True)
-        mock_wait.assert_not_called()
+        mock_waiter.assert_called_once()
     assert result.stdout == 'hello\n'
 
 
-def test_token_plus_timeout_does_not_use_event_driven():
-    """When both token and timeout are passed, wait_for_process_exit is not called."""
-    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait:
+def test_token_plus_timeout_uses_process_waiter_thread():
+    """When both token and timeout are passed, process exit is tracked by the waiter thread."""
+    with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5, token=SimpleToken())
-        mock_wait.assert_not_called()
+        mock_waiter.assert_called_once()
 
 
-def test_no_timeout_no_token_does_not_use_event_driven():
-    """When neither timeout nor token is passed, no killing mechanism is started."""
-    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait, \
+def test_no_timeout_no_token_uses_process_waiter_thread():
+    """When neither timeout nor token is passed, process exit is tracked by the waiter thread."""
+    with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter, \
          patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as mock_stdout_thread, \
          patch.object(_run_module, 'run_stderr_thread', wraps=_run_module.run_stderr_thread) as mock_stderr_thread:
         result = run(_PRINT_CMD, catch_output=True)
-        mock_wait.assert_not_called()
+        mock_waiter.assert_called_once()
         mock_stdout_thread.assert_called_once()
         mock_stderr_thread.assert_called_once()
     assert result.stdout == 'hello\n'
@@ -385,4 +402,3 @@ def test_wait_for_process_exit_without_event_driven_waiter():
     finally:
         process.kill()
         process.wait()
-

@@ -4,8 +4,7 @@ from pathlib import Path
 from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
-from threading import Lock, Thread
-from time import sleep
+from threading import Event, Lock, Thread
 from typing import IO, Any, Callable, List, Optional, Tuple, Union
 
 from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
@@ -22,10 +21,12 @@ class _FailureState:
         self.error: Optional[Exception] = None
         self._lock = Lock()
 
-    def set(self, error: Exception) -> None:
+    def set(self, error: Exception) -> bool:
         with self._lock:
             if self.error is None:
                 self.error = error
+                return True
+            return False
 
 
 @dataclass
@@ -34,12 +35,15 @@ class _ExecutionState:
     stderr_buffer: List[str] = field(default_factory=list)
     result: SubprocessResult = field(default_factory=SubprocessResult)
     failure_state: _FailureState = field(default_factory=_FailureState)
+    process_exit_event: Event = field(default_factory=Event)
+    wake_event: Event = field(default_factory=Event)
 
 
 @dataclass
 class _ReaderThreads:
     stdout: Thread
     stderr: Thread
+    process_waiter: Thread
 
 
 def run(  # noqa: PLR0913, PLR0915
@@ -79,23 +83,27 @@ def run(  # noqa: PLR0913, PLR0915
             reader_threads = _ReaderThreads(
                 stdout=run_stdout_thread(process, catch_output, stdout_callback, token, state),
                 stderr=run_stderr_thread(process, catch_output, stderr_callback, token, state),
+                process_waiter=run_process_waiter_thread(process, state),
             )
             if use_event_driven_timeout:
                 timeout_thread = run_timeout_thread(process, timeout, state.result)  # type: ignore[arg-type]
 
             while True:
                 raise_failure_if_needed(process, reader_threads, state)
+                if state.process_exit_event.is_set():
+                    break
+                timeout_seconds = 0.0001 if not use_event_driven_timeout and not isinstance(token, DefaultToken) else None
+                state.wake_event.wait(timeout_seconds)
+                state.wake_event.clear()
                 if not use_event_driven_timeout and not isinstance(token, DefaultToken):
                     try:
                         if not token:
                             kill_process_if_running(process)
                             state.result.killed_by_token = True
                     except Exception as error:  # noqa: BLE001
-                        state.failure_state.set(error)
+                        if state.failure_state.set(error):
+                            state.wake_event.set()
                         raise_failure_if_needed(process, reader_threads, state)
-                if process.poll() is not None:
-                    break
-                sleep(0.0001)
 
             join_reader_threads(reader_threads)
             raise_failure_if_needed(process, reader_threads, state)
@@ -182,6 +190,12 @@ def run_stderr_thread(process: Popen, catch_output: bool, stderr_callback: Calla
     return thread
 
 
+def run_process_waiter_thread(process: Popen[str], state: _ExecutionState) -> Thread:
+    thread = Thread(target=wait_for_process_exit_and_signal, args=(process, state))
+    thread.start()
+    return thread
+
+
 def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> None:  # type: ignore[type-arg]
     wait_for_process_exit(process, timeout)
     if process.poll() is None:
@@ -219,8 +233,15 @@ def read_stream(  # noqa: PLR0913
             if not catch_output:
                 callback(line)
         except Exception as error:  # noqa: BLE001
-            state.failure_state.set(error)
+            if state.failure_state.set(error):
+                state.wake_event.set()
             break
+
+
+def wait_for_process_exit_and_signal(process: Popen[str], state: _ExecutionState) -> None:
+    wait_for_process_exit(process, None)
+    state.process_exit_event.set()
+    state.wake_event.set()
 
 
 def fill_result(state: _ExecutionState, returncode: int) -> None:
@@ -263,6 +284,7 @@ def raise_background_failure(process: Popen[str], reader_threads: _ReaderThreads
 def join_reader_threads(reader_threads: _ReaderThreads) -> None:
     reader_threads.stdout.join()
     reader_threads.stderr.join()
+    reader_threads.process_waiter.join()
 
 
 def kill_process_if_running(process: Popen[str]) -> None:

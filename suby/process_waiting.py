@@ -5,24 +5,25 @@ import sys
 from subprocess import Popen
 from typing import Callable, Optional, cast
 
-_event_driven_waiter: Optional[Callable[[int, float], None]] = None
+_event_driven_waiter: Optional[Callable[[int, Optional[float]], None]] = None
 
 if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
     pidfd_open = cast(Callable[[int], int], os.pidfd_open)
 
-    def _wait_pidfd(pid: int, timeout_seconds: float) -> None:
+    def _wait_pidfd(pid: int, timeout_seconds: Optional[float]) -> None:
         fd = pidfd_open(pid)
         try:
             poller = select.poll()
             poller.register(fd, select.POLLIN)
-            poller.poll(timeout_seconds * 1000)
+            timeout_milliseconds = None if timeout_seconds is None else timeout_seconds * 1000
+            poller.poll(timeout_milliseconds)
         finally:
             os.close(fd)
 
     _event_driven_waiter = _wait_pidfd
 
 elif sys.platform == 'darwin' and hasattr(select, 'kqueue'):  # pragma: no cover
-    def _wait_kqueue(pid: int, timeout_seconds: float) -> None:
+    def _wait_kqueue(pid: int, timeout_seconds: Optional[float]) -> None:
         kq = select.kqueue()
         try:
             ev = select.kevent(
@@ -42,13 +43,16 @@ def has_event_driven_wait() -> bool:
     return _event_driven_waiter is not None
 
 
-def wait_for_process_exit(process: 'Popen[str]', timeout_seconds: float) -> None:
+def wait_for_process_exit(process: 'Popen[str]', timeout_seconds: Optional[float]) -> None:
     if _event_driven_waiter is not None:
         try:
             _event_driven_waiter(process.pid, timeout_seconds)
             return
         except OSError:
             pass
+    if timeout_seconds is None:
+        process.wait()
+        return
     try:
         process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
