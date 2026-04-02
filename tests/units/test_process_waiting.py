@@ -197,10 +197,16 @@ def test_concurrent_calls_thread_safety():
         process.wait()
 
 
-@pytest.mark.skipif(not _is_macos, reason='macOS only')
-def test_wait_kqueue_direct():
-    """Direct call to _wait_kqueue with a running process returns without killing it."""
-    from suby.process_waiting import _wait_kqueue  # noqa: PLC0415
+@pytest.mark.parametrize(
+    'waiter_name',
+    [
+        pytest.param('_wait_kqueue', marks=pytest.mark.skipif(not _is_macos, reason='macOS only')),
+        pytest.param('_wait_pidfd', marks=pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')),
+    ],
+)
+def test_platform_waiter_directly_returns_without_killing_running_process(waiter_name):
+    """Direct platform waiter calls return without killing a long-running process."""
+    waiter = getattr(process_waiting, waiter_name)
 
     process = subprocess.Popen(
         [sys.executable, '-c', 'import time; time.sleep(1000)'],
@@ -208,7 +214,7 @@ def test_wait_kqueue_direct():
         stderr=subprocess.PIPE,
     )
     try:
-        _wait_kqueue(process.pid, 0.01)
+        waiter(process.pid, 0.01)
 
         assert process.poll() is None
     finally:
@@ -266,25 +272,6 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
 
         assert process.poll() is not None
     finally:
-        process.wait()
-
-
-@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
-def test_wait_pidfd_direct():
-    """Direct call to _wait_pidfd with a running process returns without killing it."""
-    from suby.process_waiting import _wait_pidfd  # noqa: PLC0415
-
-    process = subprocess.Popen(
-        [sys.executable, '-c', 'import time; time.sleep(1000)'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        _wait_pidfd(process.pid, 0.01)
-
-        assert process.poll() is None
-    finally:
-        process.kill()
         process.wait()
 
 
@@ -396,22 +383,16 @@ def test_timeout_with_catch_exceptions():
     assert result.stderr == ''
 
 
-@pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
-def test_timeout_only_uses_timeout_thread_on_event_driven_platforms():
-    """Timeout-only path uses the dedicated timeout thread when event-driven waiting is available."""
+def test_timeout_only_uses_timeout_thread_according_to_platform():
+    """Timeout-only path uses the timeout thread only when event-driven waiting is available."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5)
-        mock_timeout_thread.assert_called_once()
 
-
-@pytest.mark.skipif(_is_event_driven_platform, reason='Fallback platforms only')
-def test_timeout_only_does_not_use_timeout_thread_on_fallback_platforms():
-    """Timeout-only path does not use the timeout thread when event-driven waiting is unavailable."""
-    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
-        with pytest.raises(TimeoutCancellationError):
-            run(_SLEEP_CMD, timeout=0.5)
-        mock_timeout_thread.assert_not_called()
+        if _is_event_driven_platform:
+            mock_timeout_thread.assert_called_once()
+        else:
+            mock_timeout_thread.assert_not_called()
 
 
 def test_token_plus_timeout_does_not_use_timeout_thread():
@@ -432,34 +413,33 @@ def test_event_driven_fast_process_exit_detection():
     assert result.returncode == 0
     assert elapsed < 2.0
 
-def test_token_only_uses_process_waiter_thread():
-    """When only a token is passed, process exit is still tracked by the waiter thread."""
-    with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter:
-        result = run(_PRINT_CMD, token=SimpleToken(), catch_output=True)
-        mock_waiter.assert_called_once()
-
-    assert result.stdout == 'hello\n'
-
-
-def test_token_plus_timeout_uses_process_waiter_thread():
-    """When both token and timeout are passed, process exit is tracked by the waiter thread."""
-    with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter:
-        with pytest.raises(TimeoutCancellationError):
-            run(_SLEEP_CMD, timeout=0.5, token=SimpleToken())
-        mock_waiter.assert_called_once()
-
-
-def test_no_timeout_no_token_uses_process_waiter_thread():
-    """When neither timeout nor token is passed, process exit is tracked by the waiter thread."""
+@pytest.mark.parametrize(
+    ('command', 'run_kwargs', 'expected_exception', 'expected_stdout'),
+    [
+        (_PRINT_CMD, {'token': SimpleToken(), 'catch_output': True}, None, 'hello\n'),
+        (_SLEEP_CMD, {'timeout': 0.5, 'token': SimpleToken()}, TimeoutCancellationError, None),
+        (_PRINT_CMD, {'catch_output': True}, None, 'hello\n'),
+    ],
+)
+def test_run_uses_process_waiter_thread(command, run_kwargs, expected_exception, expected_stdout):
+    """Process exit is always tracked by the waiter thread."""
     with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter, \
          patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as mock_stdout_thread, \
          patch.object(_run_module, 'run_stderr_thread', wraps=_run_module.run_stderr_thread) as mock_stderr_thread:
-        result = run(_PRINT_CMD, catch_output=True)
+        if expected_exception is None:
+            result = run(command, **run_kwargs)
+        else:
+            with pytest.raises(expected_exception):
+                run(command, **run_kwargs)
+            result = None
+
         mock_waiter.assert_called_once()
         mock_stdout_thread.assert_called_once()
         mock_stderr_thread.assert_called_once()
 
-    assert result.stdout == 'hello\n'
+    if expected_stdout is not None:
+        assert result is not None
+        assert result.stdout == expected_stdout
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='No SIGTERM on Windows')
 def test_process_killed_by_signal_during_wait():
@@ -736,59 +716,56 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
-def test_process_exit_and_stdout_last_line_callback_failure_raise_callback_error():
-    seen: List[str] = []
-
-    def stdout_callback(text: str):
-        seen.append(text)
-        if text == 'last\n':
-            time.sleep(0.1)
-            raise RuntimeError('stdout callback exploded on last line')
-
-    start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stdout callback exploded on last line') as exc_info:
-        run(
-            sys.executable,
-            '-c',
+@pytest.mark.parametrize(
+    ('callback_kwarg', 'command', 'expected_stdout', 'expected_stderr', 'error_message'),
+    [
+        (
+            'stdout_callback',
             'print("first", flush=True); print("last", flush=True)',
-            split=False,
-            stdout_callback=stdout_callback,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    assert seen == ['first\n', 'last\n']
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == 'first\nlast\n'  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
-
-
-def test_process_exit_and_stderr_last_line_callback_failure_raise_callback_error():
+            'first\nlast\n',
+            '',
+            'stdout callback exploded on last line',
+        ),
+        (
+            'stderr_callback',
+            'import sys; sys.stderr.write("first\\n"); sys.stderr.flush(); sys.stderr.write("last\\n"); sys.stderr.flush()',
+            '',
+            'first\nlast\n',
+            'stderr callback exploded on last line',
+        ),
+    ],
+)
+def test_process_exit_and_last_line_callback_failure_raise_callback_error(
+    callback_kwarg,
+    command,
+    expected_stdout,
+    expected_stderr,
+    error_message,
+):
     seen: List[str] = []
 
-    def stderr_callback(text: str):
+    def callback(text: str):
         seen.append(text)
         if text == 'last\n':
             time.sleep(0.1)
-            raise RuntimeError('stderr callback exploded on last line')
+            raise RuntimeError(error_message)
 
     start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stderr callback exploded on last line') as exc_info:
+    with pytest.raises(RuntimeError, match=error_message) as exc_info:
         run(
             sys.executable,
             '-c',
-            'import sys; sys.stderr.write("first\\n"); sys.stderr.flush(); sys.stderr.write("last\\n"); sys.stderr.flush()',
+            command,
             split=False,
-            stderr_callback=stderr_callback,
+            **{callback_kwarg: callback},
         )
     elapsed = time.perf_counter() - start
 
     assert elapsed < 2
     assert seen == ['first\n', 'last\n']
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == 'first\nlast\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == expected_stdout  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == expected_stderr  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
 
 
@@ -817,8 +794,9 @@ def test_process_exit_and_near_exit_token_error_raise_token_error():
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
-def test_near_exit_token_error_keeps_kill_returncode():
+def test_near_exit_token_error_keeps_kill_result_shape():
     returncodes = []
+    killed_flags = []
 
     for _ in range(5):
         start = time.perf_counter()
@@ -840,12 +818,15 @@ def test_near_exit_token_error_keeps_kill_returncode():
             )
 
         returncodes.append(exc_info.value.result.returncode)  # type: ignore[attr-defined]
+        killed_flags.append(exc_info.value.result.killed_by_token)  # type: ignore[attr-defined]
 
     assert returncodes == [-9, -9, -9, -9, -9]
+    assert killed_flags == [False, False, False, False, False]
 
 
-def test_timeout_and_stdout_callback_race_keeps_kill_returncode():
+def test_timeout_and_stdout_callback_race_result_shape_is_observable():
     returncodes = []
+    killed_flags = []
 
     for _ in range(5):
         def stdout_callback(_: str):
@@ -865,58 +846,8 @@ def test_timeout_and_stdout_callback_race_keeps_kill_returncode():
 
         assert isinstance(result, SubprocessResult)
         returncodes.append(result.returncode)
-
-    assert returncodes == [-9, -9, -9, -9, -9]
-
-
-def test_near_exit_token_error_keeps_killed_by_token_false():
-    killed_flags = []
-
-    for _ in range(5):
-        start = time.perf_counter()
-
-        def boom_later(start_time: float = start) -> bool:
-            if time.perf_counter() - start_time < 0.03:
-                return False
-            raise RuntimeError('token exploded near process exit')
-
-        token = ConditionToken(boom_later, suppress_exceptions=False)
-
-        with pytest.raises(RuntimeError, match='token exploded near process exit') as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; time.sleep(0.05)',
-                split=False,
-                token=token,
-            )
-
-        killed_flags.append(exc_info.value.result.killed_by_token)  # type: ignore[attr-defined]
-
-    assert killed_flags == [False, False, False, False, False]
-
-
-def test_timeout_and_stdout_callback_race_killed_by_token_shape_is_observable():
-    killed_flags = []
-
-    for _ in range(5):
-        def stdout_callback(_: str):
-            raise RuntimeError('stdout callback exploded')
-
-        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; print("hello", flush=True); time.sleep(5)',
-                split=False,
-                stdout_callback=stdout_callback,
-                timeout=0.2,
-            )
-
-        result = cast(Any, exc_info.value).result
-
-        assert isinstance(result, SubprocessResult)
         killed_flags.append(result.killed_by_token)
 
+    assert returncodes == [-9, -9, -9, -9, -9]
     assert len(killed_flags) == 5
     assert set(killed_flags).issubset({False, True})

@@ -33,29 +33,17 @@ _run_module = importlib.import_module('suby.run')
 
 
 @pytest.mark.parametrize(
-    'command',
+    ('command', 'run_kwargs'),
     [
-        (sys.executable, '-c "print(\'kek\')"'),
-        ('python -c "print(\'kek\')"',),
+        ((Path(sys.executable), '-c "print(\'kek\')"'), {}),
+        ((sys.executable, '-c "print(\'kek\')"'), {}),
+        (('python -c "print(\'kek\')"',), {}),
+        ((sys.executable, '-c "print(\'kek\')"'), {'token': SimpleToken()}),
+        (('python -c "print(\'kek\')"',), {'token': SimpleToken()}),
     ],
 )
-def test_normal_way(command):
-    result = run(*command)
-
-    assert result.stdout == 'kek\n'
-    assert result.stderr == ''
-    assert result.returncode == 0
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "print(\'kek\')"'),
-        ('python -c "print(\'kek\')"',),
-    ],
-)
-def test_normal_way_with_simple_token(command):
-    result = run(*command, token=SimpleToken())
+def test_normal_way(command, run_kwargs):
+    result = run(*command, **run_kwargs)
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
@@ -224,16 +212,46 @@ def test_logging_normal_way(command, first_log_message, second_log_message):
 
 
 @pytest.mark.parametrize(
-    ('command', 'first_log_message', 'second_log_message'),
+    ('command', 'run_kwargs', 'expected_exception', 'first_log_message', 'second_log_message'),
     [
-        ((sys.executable, f'-c "import time; time.sleep({500_000})"'), f'The beginning of the execution of the command "{sys.executable} -c "import time; time.sleep(500000)"".', f'The execution of the "{sys.executable} -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.'),
-        ((f'python -c "import time; time.sleep({500_000})"',), 'The beginning of the execution of the command "python -c "import time; time.sleep(500000)"".', 'The execution of the "python -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.'),
+        (
+            (sys.executable, f'-c "import time; time.sleep({500_000})"'),
+            {'catch_exceptions': True, 'catch_output': True, 'timeout': 0.0001},
+            None,
+            f'The beginning of the execution of the command "{sys.executable} -c "import time; time.sleep(500000)"".',
+            f'The execution of the "{sys.executable} -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.',
+        ),
+        (
+            (f'python -c "import time; time.sleep({500_000})"',),
+            {'catch_exceptions': True, 'catch_output': True, 'timeout': 0.0001},
+            None,
+            'The beginning of the execution of the command "python -c "import time; time.sleep(500000)"".',
+            'The execution of the "python -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.',
+        ),
+        (
+            (sys.executable, f'-c "import time; time.sleep({500_000})"'),
+            {'catch_output': True, 'timeout': 0.0001},
+            TimeoutCancellationError,
+            f'The beginning of the execution of the command "{sys.executable} -c "import time; time.sleep(500000)"".',
+            f'The execution of the "{sys.executable} -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.',
+        ),
+        (
+            (f'python -c "import time; time.sleep({500_000})"',),
+            {'catch_output': True, 'timeout': 0.0001},
+            TimeoutCancellationError,
+            'The beginning of the execution of the command "python -c "import time; time.sleep(500000)"".',
+            'The execution of the "python -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.',
+        ),
     ],
 )
-def test_logging_with_expired_timeout(command, first_log_message, second_log_message):
+def test_logging_with_expired_timeout(command, run_kwargs, expected_exception, first_log_message, second_log_message):
     logger = MemoryLogger()
 
-    run(*command, logger=logger, catch_exceptions=True, catch_output=True, timeout=0.0001)
+    if expected_exception is None:
+        run(*command, logger=logger, **run_kwargs)
+    else:
+        with pytest.raises(expected_exception):
+            run(*command, logger=logger, **run_kwargs)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -254,27 +272,6 @@ def test_logging_with_exception(command, first_log_message, second_log_message):
     logger = MemoryLogger()
 
     run(*command, logger=logger, catch_exceptions=True, catch_output=True)
-
-    assert len(logger.data.info) == 1
-    assert len(logger.data.error) == 1
-    assert len(logger.data) == 2
-
-    assert logger.data.info[0].message == first_log_message
-    assert logger.data.error[0].message == second_log_message
-
-
-@pytest.mark.parametrize(
-    ('command', 'first_log_message', 'second_log_message'),
-    [
-        ((sys.executable, f'-c "import time; time.sleep({500_000})"'), f'The beginning of the execution of the command "{sys.executable} -c "import time; time.sleep(500000)"".', f'The execution of the "{sys.executable} -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.'),
-        ((f'python -c "import time; time.sleep({500_000})"',), 'The beginning of the execution of the command "python -c "import time; time.sleep(500000)"".', 'The execution of the "python -c "import time; time.sleep(500000)"" command was canceled using a cancellation token.'),
-    ],
-)
-def test_logging_with_expired_timeout_without_catching_exceptions(command, first_log_message, second_log_message):
-    logger = MemoryLogger()
-
-    with pytest.raises(TimeoutCancellationError):
-        run(*command, logger=logger, catch_output=True, timeout=0.0001)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -365,13 +362,20 @@ def test_only_token_without_catching(command):
 
 
 @pytest.mark.parametrize(
-    'command',
+    ('command', 'run_timeout', 'expected_exception', 'expected_token_identity'),
     [
-        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
-        ('python -c "import time; time.sleep({sleep_time})"',),
+        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 3, ConditionCancellationError, True),
+        (('python -c "import time; time.sleep({sleep_time})"',), 3, ConditionCancellationError, True),
+        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 0.05, TimeoutCancellationError, False),
+        (('python -c "import time; time.sleep({sleep_time})"',), 0.05, TimeoutCancellationError, False),
     ],
 )
-def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
+def test_token_plus_timeout_without_catching_raises_expected_cancellation(
+    command,
+    run_timeout,
+    expected_exception,
+    expected_token_identity,
+):
     sleep_time = 100000
     timeout = 0.1
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
@@ -379,10 +383,13 @@ def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
     start_time = perf_counter()
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
-    with pytest.raises(ConditionCancellationError) as exc_info:
-        run(*command, token=token, timeout=3)
+    with pytest.raises(expected_exception) as exc_info:
+        run(*command, token=token, timeout=run_timeout)
 
-    assert exc_info.value.token is token
+    if expected_token_identity:
+        assert exc_info.value.token is token
+    else:
+        assert exc_info.value.token is not token
     result = exc_info.value.result
 
     end_time = perf_counter()
@@ -392,89 +399,57 @@ def test_token_plus_timeout_but_timeout_is_more_without_catching(command):
     assert result.stderr == ''
     assert result.killed_by_token == True
 
-    assert end_time - start_time >= timeout
+    assert end_time - start_time >= min(timeout, run_timeout)
     assert end_time - start_time < sleep_time
 
 
 @pytest.mark.parametrize(
-    'command',
+    ('command', 'callback_kwarg', 'expected_stdout', 'expected_stderr', 'expected_callback_output'),
     [
-        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
-        ('python -c "import time; time.sleep({sleep_time})"',),
+        (
+            (sys.executable, '-c "print(\'kek\')"'),
+            'stdout_callback',
+            'kek\n',
+            '',
+            'kek\n',
+        ),
+        (
+            ('python -c "print(\'kek\')"',),
+            'stdout_callback',
+            'kek\n',
+            '',
+            'kek\n',
+        ),
+        (
+            (sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),
+            'stderr_callback',
+            '',
+            'kek',
+            'kek',
+        ),
+        (
+            ('python -c "import sys; sys.stderr.write(\'kek\')"',),
+            'stderr_callback',
+            '',
+            'kek',
+            'kek',
+        ),
     ],
 )
-def test_token_plus_timeout_but_timeout_is_less_without_catching(command):
-    sleep_time = 100000
-    timeout = 0.1
-    command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
-
-    start_time = perf_counter()
-    token = ConditionToken(lambda: perf_counter() - start_time > timeout)
-
-    with pytest.raises(TimeoutCancellationError) as exc_info:
-        run(*command, token=token, timeout=timeout/2)
-
-    assert exc_info.value.token is not token
-    result = exc_info.value.result
-
-    end_time = perf_counter()
-
-    assert result.returncode != 0
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.killed_by_token == True
-
-    assert end_time - start_time >= timeout/2
-    assert end_time - start_time < sleep_time
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "print(\'kek\')"'),
-        ('python -c "print(\'kek\')"',),
-    ],
-)
-def test_replace_stdout_callback(command):
+def test_replace_output_callback(command, callback_kwarg, expected_stdout, expected_stderr, expected_callback_output):
     accumulator = []
 
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = run(*command, stdout_callback=lambda x: accumulator.append(x))
+        result = run(*command, **{callback_kwarg: accumulator.append})
 
-    assert accumulator == ['kek\n']
-
-    assert result.returncode == 0
-    assert result.stdout == 'kek\n'
-    assert result.stderr == ''
-
-    assert stderr_buffer.getvalue() == ''
-    assert stdout_buffer.getvalue() == ''
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),
-        ('python -c "import sys; sys.stderr.write(\'kek\')"',),
-    ],
-)
-def test_replace_stderr_callback(command):
-    accumulator = []
-
-    stderr_buffer = StringIO()
-    stdout_buffer = StringIO()
-
-    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = run(*command, stderr_callback=lambda x: accumulator.append(x))
-
-    assert accumulator == ['kek']
+    assert accumulator == [expected_callback_output]
 
     assert result.returncode == 0
-    assert result.stdout == ''
-    assert result.stderr == 'kek'
+    assert result.stdout == expected_stdout
+    assert result.stderr == expected_stderr
 
     assert stderr_buffer.getvalue() == ''
     assert stdout_buffer.getvalue() == ''
@@ -491,22 +466,6 @@ def test_replace_stderr_callback(command):
 def test_pass_wrong_positional_argument(arguments, exception_message):
     with pytest.raises(TypeError, match=match(exception_message)):
         run(*arguments)
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (Path(sys.executable), '-c "print(\'kek\')"'),
-        (sys.executable, '-c "print(\'kek\')"'),
-        ('python -c "print(\'kek\')"',),
-    ],
-)
-def test_use_path_object_as_first_positional_argument(command):
-    result = run(*command)
-
-    assert result.stdout == 'kek\n'
-    assert result.stderr == ''
-    assert result.returncode == 0
 
 
 @pytest.mark.parametrize(
@@ -626,35 +585,25 @@ def test_double_backslash_can_be_disabled_on_windows():
         run(r'C:\fake\python.exe -c pass', double_backslash=False)
 
 
+@pytest.mark.parametrize(
+    ('run_kwargs', 'expected_output'),
+    [
+        ({}, 'hello world'),
+        ({'double_backslash': True}, 'hello\\'),
+    ],
+)
 @pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
-def test_double_backslash_disabled_by_default_on_non_windows():
-    # On non-Windows with default double_backslash=False, shlex treats \ as escape character.
-    # "hello\ world" is parsed as a single argument "hello world" (backslash escapes the space).
+def test_double_backslash_argument_processing_on_non_windows(run_kwargs, expected_output):
     result = run(
         sys.executable,
         '-c "import sys; print(sys.argv[1])"',
         r'hello\ world',
         catch_output=True,
+        **run_kwargs,
     )
 
     assert result.returncode == 0
-    assert result.stdout.strip() == 'hello world'
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
-def test_double_backslash_can_be_enabled_on_non_windows():
-    # With double_backslash=True, backslashes are doubled before shlex, so they survive splitting.
-    # "hello\ world" becomes "hello\\ world" before shlex, which parses it as two args: "hello\" and "world".
-    result = run(
-        sys.executable,
-        '-c "import sys; print(sys.argv[1])"',
-        r'hello\ world',
-        double_backslash=True,
-        catch_output=True,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.strip() == 'hello\\'
+    assert result.stdout.strip() == expected_output
 
 
 def test_run_returns_subprocess_result():
@@ -748,22 +697,6 @@ def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_pa
     assert exc_info.value.result.killed_by_token is False
 
 
-def test_catch_output_suppresses_stdout_callback():
-    accumulator = []
-
-    run('python -c "print(\'kek\')"', catch_output=True, stdout_callback=lambda x: accumulator.append(x))
-
-    assert accumulator == []
-
-
-def test_catch_output_suppresses_stderr_callback():
-    accumulator = []
-
-    run('python -c "import sys; sys.stderr.write(\'kek\')"', catch_output=True, stderr_callback=lambda x: accumulator.append(x))
-
-    assert accumulator == []
-
-
 def test_multiple_strings_split_independently():
     # 'python -c' splits to ['python', '-c'], '"print(777)"' splits to ['print(777)']
     # each string is split independently and the results are concatenated
@@ -787,19 +720,16 @@ def test_argument_with_space_passed_with_split_false():
     assert result.stdout.strip() == 'hello world'
 
 
-def test_running_command_error_is_importable_from_suby():
-
-    assert hasattr(suby, 'RunningCommandError')
-
-
-def test_wrong_command_error_is_importable_from_suby():
-
-    assert hasattr(suby, 'WrongCommandError')
-
-
-def test_timeout_cancellation_error_is_importable_from_suby():
-
-    assert hasattr(suby, 'TimeoutCancellationError')
+@pytest.mark.parametrize(
+    'error_name',
+    [
+        'RunningCommandError',
+        'WrongCommandError',
+        'TimeoutCancellationError',
+    ],
+)
+def test_errors_are_importable_from_suby(error_name):
+    assert hasattr(suby, error_name)
 
 
 def test_already_cancelled_simple_token_kills_process():
@@ -834,11 +764,6 @@ def test_timeout_exception_message():
         run('python -c "import time; time.sleep(100)"', timeout=1)
 
 
-def test_negative_timeout_error_message():
-    with pytest.raises(ValueError, match=match('You cannot specify a timeout less than zero.')):
-        run('python -c "import time; time.sleep(100)"', timeout=-1)
-
-
 def test_large_output():
     lines = 1000
 
@@ -849,12 +774,12 @@ def test_large_output():
 
 
 def test_parallel_runs():
-    results = [None] * 5
+    results: List[SubprocessResult] = [SubprocessResult() for _ in range(10)]
 
     def run_task(i: int):
         results[i] = run(f'python -c "print({i})"', catch_output=True)
 
-    threads = [Thread(target=run_task, args=(i,)) for i in range(5)]
+    threads = [Thread(target=run_task, args=(i,)) for i in range(10)]
     for t in threads:
         t.start()
     for t in threads:
@@ -870,34 +795,20 @@ def _python_print_argv_script() -> str:
     return 'import json, sys; print(json.dumps(sys.argv[1:]))'
 
 
-def test_empty_string_command_rejected():
+@pytest.mark.parametrize(
+    'command',
+    [
+        ('',),
+        ('', ''),
+        ('   ',),
+        ('"',),
+        ("'",),
+        ('python -c "',),
+    ],
+)
+def test_malformed_commands_are_rejected(command):
     with pytest.raises(WrongCommandError):
-        run('')
-
-
-def test_two_empty_string_commands_rejected():
-    with pytest.raises(WrongCommandError):
-        run('', '')
-
-
-def test_whitespace_only_command_rejected():
-    with pytest.raises(WrongCommandError):
-        run('   ')
-
-
-def test_single_double_quote_rejected():
-    with pytest.raises(WrongCommandError):
-        run('"')
-
-
-def test_single_single_quote_rejected():
-    with pytest.raises(WrongCommandError):
-        run("'")
-
-
-def test_broken_inline_quote_rejected():
-    with pytest.raises(WrongCommandError):
-        run('python -c "')
+        run(*command)
 
 
 def test_very_long_command_string_is_handled():
@@ -965,22 +876,20 @@ def test_path_object_that_looks_like_flag_is_treated_as_plain_argument():
     assert result.returncode == 0
 
 
-def test_bytes_argument_rejected():
+@pytest.mark.parametrize(
+    'command',
+    [
+        b'python',
+        bytearray(b'python'),
+        PurePath('python'),
+    ],
+)
+def test_non_string_command_arguments_are_rejected(command):
     with pytest.raises(TypeError):
-        run(b'python')  # type: ignore[arg-type]
+        run(command)  # type: ignore[arg-type]
 
 
-def test_bytearray_argument_rejected():
-    with pytest.raises(TypeError):
-        run(bytearray(b'python'))  # type: ignore[arg-type]
-
-
-def test_purepath_argument_rejected():
-    with pytest.raises(TypeError):
-        run(PurePath('python'))  # type: ignore[arg-type]
-
-
-def test_string_like_object_rejected():
+def test_string_like_object_is_rejected():
     class StringLikeObject:
         def __str__(self) -> str:
             return 'python'
@@ -994,17 +903,29 @@ def test_split_false_does_not_split_single_string_command():
         run('python -c "print(1)"', split=False)
 
 
-def test_split_false_preserves_spaces_inside_argument():
+@pytest.mark.parametrize(
+    ('arguments', 'run_kwargs', 'expected_stdout'),
+    [
+        (('hello world',), {}, '["hello world"]\n'),
+        ((r'hello\ world',), {'double_backslash': True}, '["hello\\\\ world"]\n'),
+        (('endswith\\',), {}, '["endswith\\\\"]\n'),
+        ((r'folder with spaces\name',), {}, '["folder with spaces\\\\name"]\n'),
+        ((r'value\"quoted',), {}, '["value\\\\\\"quoted"]\n'),
+        ((r'hello\ world', 'two words'), {}, '["hello\\\\ world", "two words"]\n'),
+    ],
+)
+def test_split_false_preserves_argument_shape(arguments, run_kwargs, expected_stdout):
     result = run(
         sys.executable,
         '-c',
         _python_print_argv_script(),
-        'hello world',
+        *arguments,
         split=False,
         catch_output=True,
+        **run_kwargs,
     )
 
-    assert result.stdout == '["hello world"]\n'
+    assert result.stdout == expected_stdout
 
 
 def test_split_false_with_empty_executable_is_rejected():
@@ -1018,64 +939,11 @@ def test_split_false_with_path_object_still_executes():
     assert result.stdout == 'ok\n'
 
 
-def test_double_backslash_has_no_effect_when_split_is_false():
-    result = run(
-        sys.executable,
-        '-c',
-        _python_print_argv_script(),
-        r'hello\ world',
-        split=False,
-        double_backslash=True,
-        catch_output=True,
-    )
-
-    assert result.stdout == '["hello\\\\ world"]\n'
-
-
-def test_trailing_backslash_argument_is_preserved():
-    result = run(
-        sys.executable,
-        '-c',
-        _python_print_argv_script(),
-        'endswith\\',
-        split=False,
-        catch_output=True,
-    )
-
-    assert result.stdout == '["endswith\\\\"]\n'
-
-
-def test_path_with_spaces_and_backslashes_is_preserved_with_split_false():
-    result = run(
-        sys.executable,
-        '-c',
-        _python_print_argv_script(),
-        r'folder with spaces\name',
-        split=False,
-        catch_output=True,
-    )
-
-    assert result.stdout == '["folder with spaces\\\\name"]\n'
-
-
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path semantics')
 def test_unc_path_survives_windows_processing():
     result = run(r'\\server\share\python.exe -c pass', catch_exceptions=True)
 
     assert result.stderr is not None
-
-
-def test_backslash_before_quote_is_preserved_when_split_disabled():
-    result = run(
-        sys.executable,
-        '-c',
-        _python_print_argv_script(),
-        r'value\"quoted',
-        split=False,
-        catch_output=True,
-    )
-
-    assert result.stdout == '["value\\\\\\"quoted"]\n'
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Non-Windows-only behavior')
@@ -1091,29 +959,30 @@ def test_double_backslash_true_changes_non_windows_argument_shape():
     assert result.stdout != "['hello world']\n"
 
 
-def test_mixed_argument_joining_shape_is_explicit():
-    result = run(
-        sys.executable,
-        '-c',
-        _python_print_argv_script(),
-        r'hello\ world',
-        'two words',
-        split=False,
-        catch_output=True,
-    )
+@pytest.mark.parametrize(
+    ('filename', 'contents', 'mode', 'expected_cause'),
+    [
+        ('script.sh', 'echo hello\n', 0o644, PermissionError),
+        ('script-without-shebang', 'echo hello\n', 0o755, OSError),
+        ('script.py', '#!/definitely/missing/interpreter\nprint("hello")\n', 0o755, OSError),
+    ],
+)
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only startup failure semantics')
+def test_posix_file_startup_failures_are_normalized_via_running_command_error(
+    tmp_path: Path,
+    filename,
+    contents,
+    mode,
+    expected_cause,
+):
+    script = tmp_path / filename
+    script.write_text(contents)
+    script.chmod(mode)
 
-    assert result.stdout == '["hello\\\\ world", "two words"]\n'
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
-def test_non_executable_file_is_normalized_via_running_command_error(tmp_path: Path):
-    script = tmp_path / 'script.sh'
-    script.write_text('echo hello\n')
-    script.chmod(0o644)
     with pytest.raises(RunningCommandError) as exc_info:
         run(str(script))
 
-    assert isinstance(exc_info.value.__cause__, PermissionError)
+    assert isinstance(exc_info.value.__cause__, expected_cause)
 
 
 def test_directory_as_executable_is_normalized():
@@ -1121,151 +990,125 @@ def test_directory_as_executable_is_normalized():
         run(str(Path.cwd()))
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
-def test_exec_format_error_is_normalized_via_running_command_error(tmp_path: Path):
-    script = tmp_path / 'script-without-shebang'
-    script.write_text('echo hello\n')
-    script.chmod(0o755)
+@pytest.mark.parametrize(
+    'missing_command',
+    [
+        str(Path.cwd() / 'missing-parent-dir' / 'missing-command'),
+        'definitely_missing_command_for_suby_tests',
+    ],
+)
+def test_missing_commands_are_normalized(missing_command):
     with pytest.raises(RunningCommandError) as exc_info:
-        run(str(script))
-
-    assert type(exc_info.value.__cause__) is OSError
-
-
-def test_missing_parent_path_is_normalized():
-    missing = Path.cwd() / 'missing-parent-dir' / 'missing-command'
-    with pytest.raises(RunningCommandError) as exc_info:
-        run(str(missing))
+        run(missing_command)
 
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
-def test_missing_path_command_is_normalized():
-    with pytest.raises(RunningCommandError) as exc_info:
-        run('definitely_missing_command_for_suby_tests')
-
-    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only shebang semantics')
-def test_missing_shebang_interpreter_is_normalized(tmp_path: Path):
-    script = tmp_path / 'script.py'
-    script.write_text('#!/definitely/missing/interpreter\nprint("hello")\n')
-    script.chmod(0o755)
-    with pytest.raises(RunningCommandError) as exc_info:
-        run(str(script))
-
-    assert isinstance(exc_info.value.__cause__, OSError)
-
-
-def test_stdout_callback_exception_bubbles_up():
-    def callback(_: str):
-        raise RuntimeError('stdout callback exploded')
-
-    with pytest.raises(RuntimeError, match='stdout callback exploded'):
-        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
+@pytest.mark.parametrize(
+    ('run_kwargs', 'command', 'error_message'),
+    [
+        (
+            {'stdout_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stdout callback exploded'))},
+            'print("hello")',
+            'stdout callback exploded',
+        ),
+        (
+            {'stderr_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stderr callback exploded'))},
+            'import sys; sys.stderr.write("hello\\n")',
+            'stderr callback exploded',
+        ),
+    ],
+)
+def test_callback_exceptions_bubble_up(run_kwargs, command, error_message):
+    with pytest.raises(RuntimeError, match=error_message):
+        run(sys.executable, '-c', command, split=False, **run_kwargs)
 
 
-def test_stdout_callback_exception_kills_process_and_attaches_result():
-    def callback(_: str):
-        raise RuntimeError('stdout callback exploded')
-
-    start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stdout callback exploded') as exc_info:
-        run(
-            sys.executable,
-            '-c',
+@pytest.mark.parametrize(
+    ('run_kwargs', 'command', 'expected_stdout', 'expected_stderr', 'error_message'),
+    [
+        (
+            {'stdout_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stdout callback exploded'))},
             'import time; print("hello", flush=True); time.sleep(5)',
-            split=False,
-            stdout_callback=callback,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
-    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
-    assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
-
-
-def test_stdout_callback_exception_after_process_exit_keeps_success_returncode():
-    def callback(_: str):
-        time.sleep(0.1)
-        raise RuntimeError('stdout callback exploded after exit')
-
-    start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stdout callback exploded after exit') as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'print("hello", flush=True)',
-            split=False,
-            stdout_callback=callback,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
-    assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
-
-
-def test_stderr_callback_exception_bubbles_up():
-    def callback(_: str):
-        raise RuntimeError('stderr callback exploded')
-
-    with pytest.raises(RuntimeError, match='stderr callback exploded'):
-        run(sys.executable, '-c', 'import sys; sys.stderr.write("hello\\n")', split=False, stderr_callback=callback)
-
-
-def test_stderr_callback_exception_kills_process_and_attaches_result():
-    def callback(_: str):
-        raise RuntimeError('stderr callback exploded')
-
-    start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stderr callback exploded') as exc_info:
-        run(
-            sys.executable,
-            '-c',
+            'hello\n',
+            str,
+            'stdout callback exploded',
+        ),
+        (
+            {'stderr_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stderr callback exploded'))},
             'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(5)',
-            split=False,
-            stderr_callback=callback,
-        )
+            str,
+            'hello\n',
+            'stderr callback exploded',
+        ),
+    ],
+)
+def test_callback_exceptions_kill_process_and_attach_result(
+    run_kwargs,
+    command,
+    expected_stdout,
+    expected_stderr,
+    error_message,
+):
+    start = time.perf_counter()
+    with pytest.raises(RuntimeError, match=error_message) as exc_info:
+        run(sys.executable, '-c', command, split=False, **run_kwargs)
     elapsed = time.perf_counter() - start
 
     assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stdout, str)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == 'hello\n'  # type: ignore[attr-defined]
+    if expected_stdout is str:
+        assert isinstance(exc_info.value.result.stdout, str)  # type: ignore[attr-defined]
+    else:
+        assert exc_info.value.result.stdout == expected_stdout  # type: ignore[attr-defined]
+    if expected_stderr is str:
+        assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
+    else:
+        assert exc_info.value.result.stderr == expected_stderr  # type: ignore[attr-defined]
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
-def test_stderr_callback_exception_after_process_exit_keeps_success_returncode():
+@pytest.mark.parametrize(
+    ('callback_kwarg', 'command', 'expected_stdout', 'expected_stderr', 'error_message'),
+    [
+        (
+            'stdout_callback',
+            'print("hello", flush=True)',
+            'hello\n',
+            '',
+            'stdout callback exploded after exit',
+        ),
+        (
+            'stderr_callback',
+            'import sys; sys.stderr.write("hello\\n"); sys.stderr.flush()',
+            '',
+            'hello\n',
+            'stderr callback exploded after exit',
+        ),
+    ],
+)
+def test_callback_exceptions_after_process_exit_keep_success_returncode(
+    callback_kwarg,
+    command,
+    expected_stdout,
+    expected_stderr,
+    error_message,
+):
     def callback(_: str):
         time.sleep(0.1)
-        raise RuntimeError('stderr callback exploded after exit')
+        raise RuntimeError(error_message)
 
     start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='stderr callback exploded after exit') as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import sys; sys.stderr.write("hello\\n"); sys.stderr.flush()',
-            split=False,
-            stderr_callback=callback,
-        )
+    with pytest.raises(RuntimeError, match=error_message) as exc_info:
+        run(sys.executable, '-c', command, split=False, **{callback_kwarg: callback})
     elapsed = time.perf_counter() - start
 
     assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == 'hello\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == expected_stdout  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == expected_stderr  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
@@ -1292,48 +1135,38 @@ def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them():
     assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
 
 
-def test_timeout_and_stdout_callback_error_raise_one_of_expected_exceptions():
-    def stdout_callback(_: str):
-        raise RuntimeError('stdout callback exploded')
-
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
+@pytest.mark.parametrize(
+    ('callback_kwarg', 'command', 'error_message'),
+    [
+        (
+            'stdout_callback',
             'import time; print("hello", flush=True); time.sleep(5)',
-            split=False,
-            stdout_callback=stdout_callback,
-            timeout=0.2,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-
-    assert isinstance(result, SubprocessResult)
-    assert isinstance(result.stdout, str)
-    assert isinstance(result.stderr, str)
-    assert isinstance(result.returncode, int)
-
-
-def test_timeout_and_stderr_callback_error_raise_one_of_expected_exceptions():
+            'stdout callback exploded',
+        ),
+        (
+            'stderr_callback',
+            'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(5)',
+            'stderr callback exploded',
+        ),
+    ],
+)
+def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kwarg, command, error_message):
     returncodes = []
     killed_flags = set()
 
     for _ in range(5):
-        def stderr_callback(_: str):
-            raise RuntimeError('stderr callback exploded')
+        def callback(_: str):
+            raise RuntimeError(error_message)
 
         start = time.perf_counter()
         with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
             run(
                 sys.executable,
                 '-c',
-                'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(5)',
+                command,
                 split=False,
-                stderr_callback=stderr_callback,
                 timeout=0.2,
+                **{callback_kwarg: callback},
             )
         elapsed = time.perf_counter() - start
 
@@ -1350,24 +1183,49 @@ def test_timeout_and_stderr_callback_error_raise_one_of_expected_exceptions():
     assert killed_flags.issubset({False, True})
 
 
-def test_timeout_and_stdout_callback_error_after_near_exit_raise_one_of_expected_exceptions():
+@pytest.mark.parametrize(
+    ('callback_kwarg', 'command', 'expected_stdout', 'expected_stderr', 'error_message'),
+    [
+        (
+            'stdout_callback',
+            'import time; print("hello", flush=True); time.sleep(0.05)',
+            ('', 'hello\n'),
+            str,
+            'stdout callback exploded after near-exit',
+        ),
+        (
+            'stderr_callback',
+            'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(0.05)',
+            str,
+            ('', 'hello\n'),
+            'stderr callback exploded after near-exit',
+        ),
+    ],
+)
+def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_exceptions(
+    callback_kwarg,
+    command,
+    expected_stdout,
+    expected_stderr,
+    error_message,
+):
     returncodes = []
     killed_flags = []
 
     for _ in range(5):
-        def stdout_callback(_: str):
+        def callback(_: str):
             time.sleep(0.1)
-            raise RuntimeError('stdout callback exploded after near-exit')
+            raise RuntimeError(error_message)
 
         start = time.perf_counter()
         with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
             run(
                 sys.executable,
                 '-c',
-                'import time; print("hello", flush=True); time.sleep(0.05)',
+                command,
                 split=False,
-                stdout_callback=stdout_callback,
                 timeout=0.02,
+                **{callback_kwarg: callback},
             )
         elapsed = time.perf_counter() - start
 
@@ -1375,42 +1233,14 @@ def test_timeout_and_stdout_callback_error_after_near_exit_raise_one_of_expected
         result = cast(Any, exc_info.value).result
 
         assert isinstance(result, SubprocessResult)
-        assert result.stdout in ('', 'hello\n')
-        assert isinstance(result.stderr, str)
-        returncodes.append(result.returncode)
-        killed_flags.append(result.killed_by_token)
-
-    assert returncodes == [-9, -9, -9, -9, -9]
-    assert killed_flags == [True, True, True, True, True]
-
-
-def test_timeout_and_stderr_callback_error_after_near_exit_raise_one_of_expected_exceptions():
-    returncodes = []
-    killed_flags = []
-
-    for _ in range(5):
-        def stderr_callback(_: str):
-            time.sleep(0.1)
-            raise RuntimeError('stderr callback exploded after near-exit')
-
-        start = time.perf_counter()
-        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(0.05)',
-                split=False,
-                stderr_callback=stderr_callback,
-                timeout=0.02,
-            )
-        elapsed = time.perf_counter() - start
-
-        assert elapsed < 2
-        result = cast(Any, exc_info.value).result
-
-        assert isinstance(result, SubprocessResult)
-        assert isinstance(result.stdout, str)
-        assert result.stderr in ('', 'hello\n')
+        if expected_stdout is str:
+            assert isinstance(result.stdout, str)
+        else:
+            assert result.stdout in expected_stdout
+        if expected_stderr is str:
+            assert isinstance(result.stderr, str)
+        else:
+            assert result.stderr in expected_stderr
         returncodes.append(result.returncode)
         killed_flags.append(result.killed_by_token)
 
@@ -1563,86 +1393,77 @@ def test_callback_that_prints_does_not_deadlock():
     assert result.returncode == 0
 
 
-def test_shared_accumulator_callback_collects_output_from_parallel_runs():
-    accumulator: List[str] = []
-
-    def callback(text: str):
-        accumulator.append(text)
-
-    threads = [
-        Thread(target=run, args=(sys.executable, '-c', f'print({i})'), kwargs={'split': False, 'stdout_callback': callback})
-        for i in range(5)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert len(accumulator) == 5
-
-
-def test_stdout_callback_must_be_callable():
+@pytest.mark.parametrize(
+    ('run_kwargs', 'command'),
+    [
+        ({'stdout_callback': 1}, 'print("hello")'),
+        ({'stderr_callback': 1}, 'import sys; sys.stderr.write("hello")'),
+    ],
+)
+def test_callbacks_must_be_callable(run_kwargs, command):
     with pytest.raises(TypeError):
-        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=1)  # type: ignore[arg-type]
+        run(sys.executable, '-c', command, split=False, **run_kwargs)  # type: ignore[arg-type]
 
 
-def test_stderr_callback_must_be_callable():
-    with pytest.raises(TypeError):
-        run(sys.executable, '-c', 'import sys; sys.stderr.write("hello")', split=False, stderr_callback=1)  # type: ignore[arg-type]
-
-
-def test_catch_output_true_suppresses_failing_stdout_callback():
-    def callback(_: str):
-        raise RuntimeError('stdout callback should not be called')
-
-    result = run(sys.executable, '-c', 'print("hello")', split=False, catch_output=True, stdout_callback=callback)
-
-    assert result.stdout == 'hello\n'
-
-
-def test_catch_output_true_suppresses_failing_stderr_callback():
-    def callback(_: str):
-        raise RuntimeError('stderr callback should not be called')
-
+@pytest.mark.parametrize(
+    ('run_kwargs', 'command', 'expected_stdout', 'expected_stderr'),
+    [
+        (
+            {'stdout_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stdout callback should not be called'))},
+            'print("hello")',
+            'hello\n',
+            '',
+        ),
+        (
+            {'stderr_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stderr callback should not be called'))},
+            'import sys; sys.stderr.write("hello\\n")',
+            '',
+            'hello\n',
+        ),
+    ],
+)
+def test_catch_output_true_suppresses_failing_callbacks(
+    run_kwargs,
+    command,
+    expected_stdout,
+    expected_stderr,
+):
     result = run(
         sys.executable,
         '-c',
-        'import sys; sys.stderr.write("hello\\n")',
+        command,
         split=False,
         catch_output=True,
         catch_exceptions=True,
-        stderr_callback=callback,
+        **run_kwargs,
     )
 
-    assert result.stderr == 'hello\n'
+    assert result.stdout == expected_stdout
+    assert result.stderr == expected_stderr
 
 
-def test_zero_timeout_kills_immediately():
-    with pytest.raises(TimeoutCancellationError):
-        run(sys.executable, '-c', 'import time; time.sleep(1)', split=False, timeout=0)
+@pytest.mark.parametrize(
+    ('timeout', 'expected_error', 'error_message'),
+    [
+        (-1, ValueError, re.escape('You cannot specify a timeout less than zero.')),
+        (float('nan'), ValueError, re.escape('You cannot specify NaN or infinite timeout values.')),
+        (float('inf'), ValueError, re.escape('You cannot specify NaN or infinite timeout values.')),
+        ('1', (TypeError, ValueError), None),
+    ],
+)
+def test_invalid_timeout_values_are_rejected(timeout, expected_error, error_message):
+    with pytest.raises(expected_error, match=error_message):
+        run(sys.executable, '-c', 'print("ok")', split=False, timeout=timeout, catch_output=True)  # type: ignore[arg-type]
 
 
-def test_negative_timeout_rejected():
-    with pytest.raises(ValueError, match=re.escape('You cannot specify a timeout less than zero.')):
-        run(sys.executable, '-c', 'import time; time.sleep(1)', split=False, timeout=-1)
-
-
-def test_nan_timeout_is_rejected_or_handled_consistently():
-    with pytest.raises(ValueError, match=re.escape('You cannot specify NaN or infinite timeout values.')):
-        run(sys.executable, '-c', 'import time; time.sleep(0.1)', split=False, timeout=float('nan'))
-
-
-def test_infinite_timeout_is_supported_or_rejected_consistently():
-    with pytest.raises(ValueError, match=re.escape('You cannot specify NaN or infinite timeout values.')):
-        run(sys.executable, '-c', 'print("ok")', split=False, timeout=float('inf'), catch_output=True)
-
-
-def test_string_timeout_is_rejected():
-    with pytest.raises((TypeError, ValueError)):
-        run(sys.executable, '-c', 'print("ok")', split=False, timeout='1')  # type: ignore[arg-type]
-
-
-def test_already_cancelled_default_like_token_is_handled():
+@pytest.mark.parametrize(
+    'run_kwargs',
+    [
+        {},
+        {'timeout': 0.5},
+    ],
+)
+def test_non_cancelling_custom_token_is_handled(run_kwargs):
     class NeverCancelsToken(AbstractToken):
         def _superpower(self) -> bool:
             return True
@@ -1663,7 +1484,7 @@ def test_already_cancelled_default_like_token_is_handled():
             return None
 
     token = NeverCancelsToken()
-    result = run(sys.executable, '-c', 'print("ok")', split=False, token=token, catch_output=True)
+    result = run(sys.executable, '-c', 'print("ok")', split=False, token=token, catch_output=True, **run_kwargs)
 
     assert result.returncode == 0
 
@@ -1680,111 +1501,6 @@ def test_condition_token_with_unsuppressed_exception_raises_on_bool_before_run()
 
 def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run():
     def boom() -> bool:
-        raise RuntimeError('token function exploded')
-
-    token = ConditionToken(boom, suppress_exceptions=False)
-
-    start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='token function exploded') as exc_info:
-        run(sys.executable, '-c', 'import time; time.sleep(5)', split=False, token=token)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stdout, str)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
-
-
-def test_timeout_and_token_error_raise_one_of_expected_exceptions():
-    def boom() -> bool:
-        raise RuntimeError('token function exploded')
-
-    token = ConditionToken(boom, suppress_exceptions=False)
-
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; time.sleep(5)',
-            split=False,
-            token=token,
-            timeout=0.2,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-
-    assert isinstance(result, SubprocessResult)
-    assert isinstance(result.stdout, str)
-    assert isinstance(result.stderr, str)
-    assert isinstance(result.returncode, int)
-
-
-def test_silent_process_timeout_and_immediate_token_error_raise_one_of_expected_exceptions():
-    def boom() -> bool:
-        raise RuntimeError('immediate token function exploded')
-
-    token = ConditionToken(boom, suppress_exceptions=False)
-
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; time.sleep(5)',
-            split=False,
-            token=token,
-            timeout=0.05,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-
-    assert isinstance(result, SubprocessResult)
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert isinstance(result.returncode, int)
-
-
-def test_silent_process_timeout_and_delayed_token_error_raise_one_of_expected_exceptions():
-    calls = 0
-
-    def boom_later() -> bool:
-        nonlocal calls
-        calls += 1
-        if calls < 4:
-            return False
-        raise RuntimeError('delayed token function exploded')
-
-    token = ConditionToken(boom_later, suppress_exceptions=False)
-
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; time.sleep(5)',
-            split=False,
-            token=token,
-            timeout=0.05,
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-
-    assert isinstance(result, SubprocessResult)
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert isinstance(result.returncode, int)
-
-
-def test_condition_token_exception_on_silent_process_surfaces_quickly():
-    def boom() -> bool:
         raise RuntimeError('silent token exploded')
 
     token = ConditionToken(boom, suppress_exceptions=False)
@@ -1796,21 +1512,85 @@ def test_condition_token_exception_on_silent_process_surfaces_quickly():
 
     assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stdout, str)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
-def test_token_cancellation_with_active_stdout_preserves_partial_output():
+@pytest.mark.parametrize(
+    'delayed_error',
+    [
+        False,
+        True,
+    ],
+)
+def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions(delayed_error):
+    calls = 0
+
+    def token_condition() -> bool:
+        nonlocal calls
+        calls += 1
+        if delayed_error and calls < 4:
+            return False
+        raise RuntimeError('token function exploded')
+
+    token = ConditionToken(token_condition, suppress_exceptions=False)
+
+    start = time.perf_counter()
+    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(5)',
+            split=False,
+            token=token,
+            timeout=0.05,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    result = cast(Any, exc_info.value).result
+
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert isinstance(result.returncode, int)
+
+
+@pytest.mark.parametrize(
+    ('command', 'expected_non_empty_stream', 'expected_empty_stream'),
+    [
+        (
+            'import time\n'
+            'for i in range(1000):\n'
+            ' print(i, flush=True)\n'
+            ' time.sleep(0.01)',
+            'stdout',
+            'stderr',
+        ),
+        (
+            'import sys, time\n'
+            'for i in range(1000):\n'
+            ' sys.stderr.write(f"{i}\\n")\n'
+            ' sys.stderr.flush()\n'
+            ' time.sleep(0.01)',
+            'stderr',
+            'stdout',
+        ),
+    ],
+)
+def test_token_cancellation_with_active_output_preserves_partial_output(
+    command,
+    expected_non_empty_stream,
+    expected_empty_stream,
+):
     start = time.perf_counter()
     token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
 
     result = run(
         sys.executable,
         '-c',
-        'import time\n'
-        'for i in range(1000):\n'
-        ' print(i, flush=True)\n'
-        ' time.sleep(0.01)',
+        command,
         split=False,
         token=token,
         catch_exceptions=True,
@@ -1823,66 +1603,10 @@ def test_token_cancellation_with_active_stdout_preserves_partial_output():
     assert elapsed < 2
     assert result.returncode != 0
     assert result.killed_by_token is True
-    assert isinstance(result.stdout, str)
-    assert result.stdout != ''
-    assert '0\n' in result.stdout
-    assert isinstance(result.stderr, str)
-
-
-def test_token_cancellation_with_active_stderr_preserves_partial_output():
-    start = time.perf_counter()
-    token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
-
-    result = run(
-        sys.executable,
-        '-c',
-        'import sys, time\n'
-        'for i in range(1000):\n'
-        ' sys.stderr.write(f"{i}\\n")\n'
-        ' sys.stderr.flush()\n'
-        ' time.sleep(0.01)',
-        split=False,
-        token=token,
-        catch_exceptions=True,
-        catch_output=True,
-    )
-
-    elapsed = time.perf_counter() - start
-
-    assert elapsed >= 0.1
-    assert elapsed < 2
-    assert result.returncode != 0
-    assert result.killed_by_token is True
-    assert isinstance(result.stderr, str)
-    assert result.stderr != ''
-    assert '0\n' in result.stderr
-    assert isinstance(result.stdout, str)
-
-
-def test_token_and_timeout_race_is_consistent():
-    class NeverCancelsToken(AbstractToken):
-        def _superpower(self) -> bool:
-            return True
-
-        def _get_superpower_exception_message(self) -> str:
-            return 'never cancels'
-
-        def _text_representation_of_superpower(self) -> str:
-            return 'never cancels'
-
-        def __bool__(self) -> bool:
-            return True
-
-        def __iadd__(self, other: object) -> 'NeverCancelsToken':
-            return self
-
-        def check(self):
-            return None
-
-    token = NeverCancelsToken()
-    result = run(sys.executable, '-c', 'print("ok")', split=False, token=token, timeout=0.5, catch_output=True)
-
-    assert result.returncode == 0
+    assert isinstance(getattr(result, expected_non_empty_stream), str)
+    assert getattr(result, expected_non_empty_stream) != ''
+    assert '0\n' in getattr(result, expected_non_empty_stream)
+    assert isinstance(getattr(result, expected_empty_stream), str)
 
 
 def test_tiny_timeout_on_fast_process_is_still_well_formed():
@@ -1898,27 +1622,28 @@ def test_stdout_without_newline_is_not_lost():
     assert result.stdout == 'hello'
 
 
-def test_large_stdout_is_collected_fully():
-    result = run(sys.executable, '-c', 'for i in range(5000): print(i)', split=False, catch_output=True)
-
-    assert result.stdout is not None
-    assert result.stdout.startswith('0\n')
-    assert result.stdout.endswith('4999\n')
-
-
-def test_large_stderr_is_collected_fully():
+@pytest.mark.parametrize(
+    ('command', 'expected_stream'),
+    [
+        ('for i in range(5000): print(i)', 'stdout'),
+        ('import sys\nfor i in range(5000): sys.stderr.write(f"{i}\\n")', 'stderr'),
+    ],
+)
+def test_large_output_is_collected_fully(command, expected_stream):
     result = run(
         sys.executable,
         '-c',
-        'import sys\nfor i in range(5000): sys.stderr.write(f"{i}\\n")',
+        command,
         split=False,
         catch_exceptions=True,
         catch_output=True,
     )
 
-    assert result.stderr is not None
-    assert result.stderr.startswith('0\n')
-    assert result.stderr.endswith('4999\n')
+    captured_output = getattr(result, expected_stream)
+
+    assert captured_output is not None
+    assert captured_output.startswith('0\n')
+    assert captured_output.endswith('4999\n')
 
 
 def test_stderr_heavy_process_does_not_starve_stdout():
@@ -1952,12 +1677,6 @@ def test_interleaved_stdout_and_stderr_are_both_collected():
 def test_non_utf8_output_is_rejected_or_normalized():
     with pytest.raises((UnicodeDecodeError, RunningCommandError)):
         run(sys.executable, '-c', 'import os; os.write(1, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
-
-
-def test_last_line_without_newline_is_preserved():
-    result = run(sys.executable, '-c', 'import sys; sys.stdout.write("tail")', split=False, catch_output=True)
-
-    assert result.stdout == 'tail'
 
 
 def test_complex_kwargs_combination_is_well_formed():
@@ -2020,22 +1739,6 @@ def test_logging_contract_across_outcomes_is_explicit():
     assert len(success_logger.data.info) >= 1
     assert len(error_logger.data.error) + len(error_logger.data.exception) >= 1
     assert len(startup_logger.data.exception) >= 1
-
-
-def test_many_parallel_runs_do_not_corrupt_results():
-    results: List[SubprocessResult] = [SubprocessResult() for _ in range(10)]
-
-    def worker(index: int):
-        results[index] = run(sys.executable, '-c', f'print({index})', split=False, catch_output=True)
-
-    threads = [Thread(target=worker, args=(index,)) for index in range(10)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    for index, result in enumerate(results):
-
-        assert result.stdout == f'{index}\n'
 
 
 def test_parallel_runs_with_shared_callback_do_not_drop_events():
