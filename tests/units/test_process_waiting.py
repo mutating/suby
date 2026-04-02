@@ -6,7 +6,7 @@ import sys
 import time
 from threading import Thread
 from time import monotonic
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from cantok import SimpleToken, TimeoutCancellationError
@@ -190,6 +190,60 @@ def test_wait_kqueue_direct():
         assert process.poll() is None
     finally:
         process.kill()
+        process.wait()
+
+
+@pytest.mark.skipif(not _is_macos, reason='macOS only')
+def test_macos_wait_for_process_exit_passes_none_to_event_driven_waiter():
+    """On macOS, None timeout is forwarded to the event-driven waiter unchanged."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'pass'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        with patch('suby.process_waiting._event_driven_waiter') as mock_waiter:
+            wait_for_process_exit(process, None)
+        mock_waiter.assert_called_once_with(process.pid, None)
+    finally:
+        process.wait()
+
+
+@pytest.mark.skipif(not _is_macos, reason='macOS only')
+def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
+    """The macOS kqueue waiter builds the expected exit subscription and closes the queue."""
+    import suby.process_waiting as process_waiting  # noqa: PLC0415
+
+    mock_kqueue = MagicMock()
+    mock_event = object()
+
+    with patch.object(process_waiting.select, 'kqueue', return_value=mock_kqueue), \
+         patch.object(process_waiting.select, 'kevent', return_value=mock_event) as mock_kevent:
+        process_waiting._wait_kqueue(12345, 0.5)
+
+    mock_kevent.assert_called_once_with(
+        12345,
+        filter=process_waiting.select.KQ_FILTER_PROC,
+        flags=process_waiting.select.KQ_EV_ADD | process_waiting.select.KQ_EV_ONESHOT,
+        fflags=process_waiting.select.KQ_NOTE_EXIT,
+    )
+    mock_kqueue.control.assert_called_once_with([mock_event], 1, 0.5)
+    mock_kqueue.close.assert_called_once()
+
+
+@pytest.mark.skipif(not _is_macos, reason='macOS only')
+def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
+    """If the macOS waiter raises OSError, wait_for_process_exit falls back to process.wait()."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'pass'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
+            wait_for_process_exit(process, None)
+        assert process.poll() is not None
+    finally:
         process.wait()
 
 
