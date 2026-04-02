@@ -3,7 +3,7 @@ import re
 import sys
 import time
 from pathlib import Path, PurePath
-from threading import Thread
+from threading import Barrier, Event, Thread
 from typing import Any, List, cast
 from unittest.mock import patch
 
@@ -426,6 +426,39 @@ def test_stderr_callback_exception_after_process_exit_keeps_success_returncode()
     assert exc_info.value.result.stderr == 'hello\n'  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
+
+
+def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals_race() -> None:
+    process_exited = Event()
+    synchronized_release = Barrier(2)
+
+    def controlled_waiter(process: Any, state: Any) -> None:
+        _run_module.wait_for_process_exit(process, None)
+        process_exited.set()
+        synchronized_release.wait(timeout=1)
+        state.process_exit_event.set()
+        state.wake_event.set()
+
+    def stdout_callback(_: str) -> None:
+        if not process_exited.wait(timeout=1):
+            raise RuntimeError('coordinated race setup failed')
+        synchronized_release.wait(timeout=1)
+        raise RuntimeError('stdout callback exploded in coordinated race')
+
+    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter):
+        with pytest.raises(RuntimeError, match='stdout callback exploded in coordinated race') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'print("hello", flush=True)',
+                split=False,
+                stdout_callback=stdout_callback,
+            )
+
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
 
 
 def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them() -> None:
