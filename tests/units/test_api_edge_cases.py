@@ -353,6 +353,7 @@ def test_stdout_callback_exception_after_process_exit_keeps_success_returncode()
         time.sleep(0.1)
         raise RuntimeError('stdout callback exploded after exit')
 
+    start = time.perf_counter()
     with pytest.raises(RuntimeError, match='stdout callback exploded after exit') as exc_info:
         run(
             sys.executable,
@@ -361,7 +362,9 @@ def test_stdout_callback_exception_after_process_exit_keeps_success_returncode()
             split=False,
             stdout_callback=callback,
         )
+    elapsed = time.perf_counter() - start
 
+    assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
@@ -406,6 +409,7 @@ def test_stderr_callback_exception_after_process_exit_keeps_success_returncode()
         time.sleep(0.1)
         raise RuntimeError('stderr callback exploded after exit')
 
+    start = time.perf_counter()
     with pytest.raises(RuntimeError, match='stderr callback exploded after exit') as exc_info:
         run(
             sys.executable,
@@ -414,7 +418,9 @@ def test_stderr_callback_exception_after_process_exit_keeps_success_returncode()
             split=False,
             stderr_callback=callback,
         )
+    elapsed = time.perf_counter() - start
 
+    assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == 'hello\n'  # type: ignore[attr-defined]
@@ -538,6 +544,87 @@ def test_timeout_and_stderr_callback_error_after_near_exit_raise_one_of_expected
     assert isinstance(result.stdout, str)
     assert result.stderr == 'hello\n'
     assert isinstance(result.returncode, int)
+
+
+def test_process_exit_and_stdout_last_line_callback_failure_raise_callback_error() -> None:
+    seen: List[str] = []
+
+    def stdout_callback(text: str) -> None:
+        seen.append(text)
+        if text == 'last\n':
+            time.sleep(0.1)
+            raise RuntimeError('stdout callback exploded on last line')
+
+    start = time.perf_counter()
+    with pytest.raises(RuntimeError, match='stdout callback exploded on last line') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'print("first", flush=True); print("last", flush=True)',
+            split=False,
+            stdout_callback=stdout_callback,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    assert seen == ['first\n', 'last\n']
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'first\nlast\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
+
+
+def test_process_exit_and_stderr_last_line_callback_failure_raise_callback_error() -> None:
+    seen: List[str] = []
+
+    def stderr_callback(text: str) -> None:
+        seen.append(text)
+        if text == 'last\n':
+            time.sleep(0.1)
+            raise RuntimeError('stderr callback exploded on last line')
+
+    start = time.perf_counter()
+    with pytest.raises(RuntimeError, match='stderr callback exploded on last line') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import sys; sys.stderr.write("first\\n"); sys.stderr.flush(); sys.stderr.write("last\\n"); sys.stderr.flush()',
+            split=False,
+            stderr_callback=stderr_callback,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    assert seen == ['first\n', 'last\n']
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == 'first\nlast\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
+
+
+def test_process_exit_and_near_exit_token_error_raise_token_error() -> None:
+    start = time.perf_counter()
+
+    def boom_later() -> bool:
+        if time.perf_counter() - start < 0.03:
+            return False
+        raise RuntimeError('token exploded near process exit')
+
+    token = ConditionToken(boom_later, suppress_exceptions=False)
+
+    with pytest.raises(RuntimeError, match='token exploded near process exit') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(0.05)',
+            split=False,
+            token=token,
+        )
+
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten() -> None:
