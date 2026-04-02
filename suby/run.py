@@ -110,7 +110,7 @@ def run(  # noqa: PLR0913, PLR0915
             if use_event_driven_timeout:
                 timeout_thread.join()
 
-    except OSError as e:  # pragma: no cover
+    except OSError as e:
         fill_startup_failure_result(state.result, e)
         if not catch_exceptions:
             message = f'Error when executing the command "{arguments_string_representation}".'

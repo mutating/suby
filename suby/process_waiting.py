@@ -7,7 +7,7 @@ from typing import Callable, Optional, cast
 
 _event_driven_waiter: Optional[Callable[[int, Optional[float]], None]] = None
 
-if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
+if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):
     pidfd_open = cast(Callable[[int], int], os.pidfd_open)
 
     def _wait_pidfd(pid: int, timeout_seconds: Optional[float]) -> None:
@@ -22,7 +22,7 @@ if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
 
     _event_driven_waiter = _wait_pidfd
 
-elif sys.platform == 'darwin' and hasattr(select, 'kqueue'):  # pragma: no cover
+elif sys.platform == 'darwin' and hasattr(select, 'kqueue'):
     def _wait_kqueue(pid: int, timeout_seconds: Optional[float]) -> None:
         kq = select.kqueue()
         try:
