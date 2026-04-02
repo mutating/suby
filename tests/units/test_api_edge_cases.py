@@ -557,6 +557,50 @@ def test_existing_result_attribute_on_callback_exception_is_not_overwritten() ->
     assert exc_info.value.result is preserved_result  # type: ignore[attr-defined]
 
 
+def test_result_getter_failure_does_not_mask_original_exception() -> None:
+    class ExplodingResultGetterError(RuntimeError):
+        @property
+        def result(self) -> SubprocessResult:
+            raise RuntimeError('result getter exploded')
+
+    def callback(_: str) -> None:
+        raise ExplodingResultGetterError('stdout callback exploded')
+
+    with pytest.raises(ExplodingResultGetterError, match='stdout callback exploded'):
+        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
+
+
+def test_result_setter_failure_does_not_mask_original_exception() -> None:
+    class ExplodingResultSetterError(RuntimeError):
+        @property
+        def result(self) -> None:
+            return None
+
+        @result.setter
+        def result(self, _value: SubprocessResult) -> None:
+            raise RuntimeError('result setter exploded')
+
+    def callback(_: str) -> None:
+        raise ExplodingResultSetterError('stdout callback exploded')
+
+    with pytest.raises(ExplodingResultSetterError, match='stdout callback exploded'):
+        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
+
+
+def test_result_assignment_failure_does_not_mask_original_exception() -> None:
+    class ExplodingResultAssignmentError(RuntimeError):
+        def __setattr__(self, name: str, value: object) -> None:
+            if name == 'result':
+                raise RuntimeError('result assignment exploded')
+            super().__setattr__(name, value)
+
+    def callback(_: str) -> None:
+        raise ExplodingResultAssignmentError('stdout callback exploded')
+
+    with pytest.raises(ExplodingResultAssignmentError, match='stdout callback exploded'):
+        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
+
+
 def test_slow_stdout_callback_does_not_prevent_completion() -> None:
     seen: List[str] = []
 
@@ -812,6 +856,7 @@ def test_token_cancellation_with_active_stdout_preserves_partial_output() -> Non
     assert elapsed < 2
     assert result.returncode != 0
     assert result.killed_by_token is True
+    assert isinstance(result.stdout, str)
     assert result.stdout != ''
     assert '0\n' in result.stdout
     assert isinstance(result.stderr, str)
@@ -841,6 +886,7 @@ def test_token_cancellation_with_active_stderr_preserves_partial_output() -> Non
     assert elapsed < 2
     assert result.returncode != 0
     assert result.killed_by_token is True
+    assert isinstance(result.stderr, str)
     assert result.stderr != ''
     assert '0\n' in result.stderr
     assert isinstance(result.stdout, str)

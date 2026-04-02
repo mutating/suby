@@ -298,8 +298,17 @@ def kill_process_if_running(process: Popen[str]) -> None:
 
 def attach_result_to_exception(error: BaseException, result: SubprocessResult) -> None:
     try:
-        if hasattr(error, 'result'):
-            return
-        error.result = result  # type: ignore[attr-defined]
+        error_dict = object.__getattribute__(error, '__dict__')
     except (AttributeError, TypeError):
+        error_dict = {}
+
+    if 'result' in error_dict:
+        return
+
+    if any('result' in cls.__dict__ for cls in type(error).__mro__):
+        return
+
+    try:
+        error.result = result  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
         pass
