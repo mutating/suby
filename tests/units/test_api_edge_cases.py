@@ -445,15 +445,15 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
         synchronized_release.wait(timeout=1)
         raise RuntimeError('stdout callback exploded in coordinated race')
 
-    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter):
-        with pytest.raises(RuntimeError, match='stdout callback exploded in coordinated race') as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'print("hello", flush=True)',
-                split=False,
-                stdout_callback=stdout_callback,
-            )
+    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
+         pytest.raises(RuntimeError, match='stdout callback exploded in coordinated race') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'print("hello", flush=True)',
+            split=False,
+            stdout_callback=stdout_callback,
+        )
 
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
@@ -480,15 +480,15 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
 
     token = ConditionToken(boom_in_race, suppress_exceptions=False)
 
-    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter):
-        with pytest.raises(RuntimeError, match='token exploded in coordinated race') as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; time.sleep(0.02)',
-                split=False,
-                token=token,
-            )
+    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
+         pytest.raises(RuntimeError, match='token exploded in coordinated race') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(0.02)',
+            split=False,
+            token=token,
+        )
 
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]

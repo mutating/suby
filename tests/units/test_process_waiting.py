@@ -239,6 +239,24 @@ def test_timeout_with_catch_exceptions():
     result = run(_SLEEP_CMD, timeout=0.5, catch_exceptions=True)
     assert result.killed_by_token is True
     assert result.returncode != 0
+    assert result.stdout == ''
+    assert result.stderr == ''
+
+
+def test_timeout_only_uses_timeout_thread():
+    """Timeout-only path uses the dedicated timeout thread."""
+    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
+        with pytest.raises(TimeoutCancellationError):
+            run(_SLEEP_CMD, timeout=0.5)
+        mock_timeout_thread.assert_called_once()
+
+
+def test_token_plus_timeout_does_not_use_timeout_thread():
+    """When a custom token is passed, timeout thread is not used."""
+    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
+        with pytest.raises(TimeoutCancellationError):
+            run(_SLEEP_CMD, timeout=0.5, token=SimpleToken())
+        mock_timeout_thread.assert_not_called()
 
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
