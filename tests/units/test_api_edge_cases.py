@@ -714,6 +714,64 @@ def test_timeout_and_token_error_raise_one_of_expected_exceptions() -> None:
     assert isinstance(result.returncode, int)
 
 
+def test_silent_process_timeout_and_immediate_token_error_raise_one_of_expected_exceptions() -> None:
+    def boom() -> bool:
+        raise RuntimeError('immediate token function exploded')
+
+    token = ConditionToken(boom, suppress_exceptions=False)
+
+    start = time.perf_counter()
+    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(5)',
+            split=False,
+            token=token,
+            timeout=0.05,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    result = cast(Any, exc_info.value).result
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert isinstance(result.returncode, int)
+
+
+def test_silent_process_timeout_and_delayed_token_error_raise_one_of_expected_exceptions() -> None:
+    calls = 0
+
+    def boom_later() -> bool:
+        nonlocal calls
+        calls += 1
+        if calls < 4:
+            return False
+        raise RuntimeError('delayed token function exploded')
+
+    token = ConditionToken(boom_later, suppress_exceptions=False)
+
+    start = time.perf_counter()
+    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(5)',
+            split=False,
+            token=token,
+            timeout=0.05,
+        )
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2
+    result = cast(Any, exc_info.value).result
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert isinstance(result.returncode, int)
+
+
 def test_condition_token_exception_on_silent_process_surfaces_quickly() -> None:
     def boom() -> bool:
         raise RuntimeError('silent token exploded')
