@@ -461,6 +461,41 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
 
 
+def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_signals_race() -> None:
+    process_exited = Event()
+    synchronized_release = Barrier(2)
+
+    def controlled_waiter(process: Any, state: Any) -> None:
+        _run_module.wait_for_process_exit(process, None)
+        process_exited.set()
+        synchronized_release.wait(timeout=1)
+        state.process_exit_event.set()
+        state.wake_event.set()
+
+    def boom_in_race() -> bool:
+        if not process_exited.is_set():
+            return False
+        synchronized_release.wait(timeout=1)
+        raise RuntimeError('token exploded in coordinated race')
+
+    token = ConditionToken(boom_in_race, suppress_exceptions=False)
+
+    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter):
+        with pytest.raises(RuntimeError, match='token exploded in coordinated race') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; time.sleep(0.02)',
+                split=False,
+                token=token,
+            )
+
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
+
+
 def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them() -> None:
     def stdout_callback(_: str) -> None:
         raise RuntimeError('stdout callback exploded')
