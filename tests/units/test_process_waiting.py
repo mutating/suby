@@ -395,12 +395,22 @@ def test_timeout_with_catch_exceptions():
     assert result.stderr == ''
 
 
-def test_timeout_only_uses_timeout_thread():
-    """Timeout-only path uses the dedicated timeout thread."""
+@pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
+def test_timeout_only_uses_timeout_thread_on_event_driven_platforms():
+    """Timeout-only path uses the dedicated timeout thread when event-driven waiting is available."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5)
         mock_timeout_thread.assert_called_once()
+
+
+@pytest.mark.skipif(_is_event_driven_platform, reason='Fallback platforms only')
+def test_timeout_only_does_not_use_timeout_thread_on_fallback_platforms():
+    """Timeout-only path does not use the timeout thread when event-driven waiting is unavailable."""
+    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
+        with pytest.raises(TimeoutCancellationError):
+            run(_SLEEP_CMD, timeout=0.5)
+        mock_timeout_thread.assert_not_called()
 
 
 def test_token_plus_timeout_does_not_use_timeout_thread():
