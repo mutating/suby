@@ -681,6 +681,63 @@ def test_condition_token_exception_on_silent_process_surfaces_quickly() -> None:
     assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
 
 
+def test_token_cancellation_with_active_stdout_preserves_partial_output() -> None:
+    start = time.perf_counter()
+    token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import time\n'
+        'for i in range(1000):\n'
+        ' print(i, flush=True)\n'
+        ' time.sleep(0.01)',
+        split=False,
+        token=token,
+        catch_exceptions=True,
+        catch_output=True,
+    )
+
+    elapsed = time.perf_counter() - start
+
+    assert elapsed >= 0.1
+    assert elapsed < 2
+    assert result.returncode != 0
+    assert result.killed_by_token is True
+    assert result.stdout != ''
+    assert '0\n' in result.stdout
+    assert isinstance(result.stderr, str)
+
+
+def test_token_cancellation_with_active_stderr_preserves_partial_output() -> None:
+    start = time.perf_counter()
+    token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import sys, time\n'
+        'for i in range(1000):\n'
+        ' sys.stderr.write(f"{i}\\n")\n'
+        ' sys.stderr.flush()\n'
+        ' time.sleep(0.01)',
+        split=False,
+        token=token,
+        catch_exceptions=True,
+        catch_output=True,
+    )
+
+    elapsed = time.perf_counter() - start
+
+    assert elapsed >= 0.1
+    assert elapsed < 2
+    assert result.returncode != 0
+    assert result.killed_by_token is True
+    assert result.stderr != ''
+    assert '0\n' in result.stderr
+    assert isinstance(result.stdout, str)
+
+
 def test_token_and_timeout_race_is_consistent() -> None:
     token = NeverCancelsToken()
     result = run(sys.executable, '-c', 'print("ok")', split=False, token=token, timeout=0.5, catch_output=True)
