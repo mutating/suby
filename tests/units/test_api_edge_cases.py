@@ -763,6 +763,57 @@ def test_process_exit_and_near_exit_token_error_raise_token_error() -> None:
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
+def test_near_exit_token_error_keeps_kill_returncode() -> None:
+    returncodes = []
+
+    for _ in range(5):
+        start = time.perf_counter()
+
+        def boom_later() -> bool:
+            if time.perf_counter() - start < 0.03:
+                return False
+            raise RuntimeError('token exploded near process exit')
+
+        token = ConditionToken(boom_later, suppress_exceptions=False)
+
+        with pytest.raises(RuntimeError, match='token exploded near process exit') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; time.sleep(0.05)',
+                split=False,
+                token=token,
+            )
+
+        returncodes.append(exc_info.value.result.returncode)  # type: ignore[attr-defined]
+
+    assert returncodes == [-9, -9, -9, -9, -9]
+
+
+def test_timeout_and_stdout_callback_race_keeps_kill_returncode() -> None:
+    returncodes = []
+
+    for _ in range(5):
+        def stdout_callback(_: str) -> None:
+            raise RuntimeError('stdout callback exploded')
+
+        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; print("hello", flush=True); time.sleep(5)',
+                split=False,
+                stdout_callback=stdout_callback,
+                timeout=0.2,
+            )
+
+        result = cast(Any, exc_info.value).result
+        assert isinstance(result, SubprocessResult)
+        returncodes.append(result.returncode)
+
+    assert returncodes == [-9, -9, -9, -9, -9]
+
+
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten() -> None:
     preserved_result = SubprocessResult()
     preserved_result.stdout = 'preserved'
