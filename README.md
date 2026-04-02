@@ -260,7 +260,7 @@ If a timeout and another failure race with each other, the timeout may still win
 
 If a token exception has already been recorded before the timeout path wins the race, `suby` keeps propagating that token exception instead.
 
-In timeout-versus-callback races, the attached `result.killed_by_token` flag may be either `True` or `False`, depending on whether the timeout path marked the result before the callback failure path was handled.
+In timeout-versus-callback races, whether the callback comes from `stdout` or `stderr`, the attached `result.killed_by_token` flag may be either `True` or `False`, depending on whether the timeout path marked the result before the callback failure path was handled.
 
 </details>
 

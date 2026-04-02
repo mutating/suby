@@ -622,26 +622,35 @@ def test_timeout_and_stdout_callback_error_raise_one_of_expected_exceptions() ->
 
 
 def test_timeout_and_stderr_callback_error_raise_one_of_expected_exceptions() -> None:
-    def stderr_callback(_: str) -> None:
-        raise RuntimeError('stderr callback exploded')
+    returncodes = []
+    killed_flags = set()
 
-    start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(5)',
-            split=False,
-            stderr_callback=stderr_callback,
-            timeout=0.2,
-        )
-    elapsed = time.perf_counter() - start
-    assert elapsed < 2
-    result = cast(Any, exc_info.value).result
-    assert isinstance(result, SubprocessResult)
-    assert isinstance(result.stdout, str)
-    assert isinstance(result.stderr, str)
-    assert isinstance(result.returncode, int)
+    for _ in range(5):
+        def stderr_callback(_: str) -> None:
+            raise RuntimeError('stderr callback exploded')
+
+        start = time.perf_counter()
+        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import sys, time; sys.stderr.write("hello\\n"); sys.stderr.flush(); time.sleep(5)',
+                split=False,
+                stderr_callback=stderr_callback,
+                timeout=0.2,
+            )
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2
+        result = cast(Any, exc_info.value).result
+        assert isinstance(result, SubprocessResult)
+        assert isinstance(result.stdout, str)
+        assert isinstance(result.stderr, str)
+        returncodes.append(result.returncode)
+        killed_flags.add(result.killed_by_token)
+
+    assert returncodes == [-9, -9, -9, -9, -9]
+    assert killed_flags.issubset({False, True})
 
 
 def test_timeout_and_stdout_callback_error_after_near_exit_raise_one_of_expected_exceptions() -> None:
