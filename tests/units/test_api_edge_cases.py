@@ -496,7 +496,7 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
-def test_timeout_thread_can_race_with_recorded_stdout_failure_before_main_thread_handles_it() -> None:
+def test_timeout_thread_can_win_before_stdout_failure_is_recorded() -> None:
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
@@ -511,22 +511,34 @@ def test_timeout_thread_can_race_with_recorded_stdout_failure_before_main_thread
     def stdout_callback(_: str) -> None:
         raise RuntimeError('stdout callback exploded before timeout handling')
 
-    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed):
-        with pytest.raises(RuntimeError, match='stdout callback exploded before timeout handling') as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; print("hello", flush=True); time.sleep(5)',
-                split=False,
-                stdout_callback=stdout_callback,
-                timeout=0.01,
-            )
+    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed), \
+         pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("hello", flush=True); time.sleep(5)',
+            split=False,
+            stdout_callback=stdout_callback,
+            timeout=0.01,
+        )
 
-    assert failure_recorded.is_set()
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
+    result = cast(Any, exc_info.value).result
+    assert isinstance(result, SubprocessResult)
+
+    if isinstance(exc_info.value, TimeoutCancellationError):
+        assert failure_recorded.is_set() is False
+        assert result.stdout == ''
+        assert result.stderr == ''
+        assert result.returncode == -9
+        assert result.killed_by_token is True
+    else:
+        assert isinstance(exc_info.value, RuntimeError)
+        assert str(exc_info.value) == 'stdout callback exploded before timeout handling'
+        assert failure_recorded.is_set() is True
+        assert result.stdout == 'hello\n'
+        assert isinstance(result.stderr, str)
+        assert result.returncode == -9
+        assert result.killed_by_token is False
 
 
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it() -> None:
@@ -546,16 +558,16 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
 
     token = ConditionToken(boom, suppress_exceptions=False)
 
-    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed):
-        with pytest.raises(RuntimeError, match='token exploded before timeout handling') as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; time.sleep(5)',
-                split=False,
-                token=token,
-                timeout=0.01,
-            )
+    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed), \
+         pytest.raises(RuntimeError, match='token exploded before timeout handling') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; time.sleep(5)',
+            split=False,
+            token=token,
+            timeout=0.01,
+        )
 
     assert failure_recorded.is_set()
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
@@ -769,8 +781,8 @@ def test_near_exit_token_error_keeps_kill_returncode() -> None:
     for _ in range(5):
         start = time.perf_counter()
 
-        def boom_later() -> bool:
-            if time.perf_counter() - start < 0.03:
+        def boom_later(start_time: float = start) -> bool:
+            if time.perf_counter() - start_time < 0.03:
                 return False
             raise RuntimeError('token exploded near process exit')
 
@@ -812,6 +824,58 @@ def test_timeout_and_stdout_callback_race_keeps_kill_returncode() -> None:
         returncodes.append(result.returncode)
 
     assert returncodes == [-9, -9, -9, -9, -9]
+
+
+def test_near_exit_token_error_keeps_killed_by_token_false() -> None:
+    killed_flags = []
+
+    for _ in range(5):
+        start = time.perf_counter()
+
+        def boom_later(start_time: float = start) -> bool:
+            if time.perf_counter() - start_time < 0.03:
+                return False
+            raise RuntimeError('token exploded near process exit')
+
+        token = ConditionToken(boom_later, suppress_exceptions=False)
+
+        with pytest.raises(RuntimeError, match='token exploded near process exit') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; time.sleep(0.05)',
+                split=False,
+                token=token,
+            )
+
+        killed_flags.append(exc_info.value.result.killed_by_token)  # type: ignore[attr-defined]
+
+    assert killed_flags == [False, False, False, False, False]
+
+
+def test_timeout_and_stdout_callback_race_killed_by_token_shape_is_observable() -> None:
+    killed_flags = []
+
+    for _ in range(5):
+        def stdout_callback(_: str) -> None:
+            raise RuntimeError('stdout callback exploded')
+
+        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; print("hello", flush=True); time.sleep(5)',
+                split=False,
+                stdout_callback=stdout_callback,
+                timeout=0.2,
+            )
+
+        result = cast(Any, exc_info.value).result
+        assert isinstance(result, SubprocessResult)
+        killed_flags.append(result.killed_by_token)
+
+    assert len(killed_flags) == 5
+    assert set(killed_flags).issubset({False, True})
 
 
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten() -> None:
