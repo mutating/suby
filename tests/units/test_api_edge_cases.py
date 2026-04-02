@@ -496,6 +496,74 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
+def test_timeout_thread_can_race_with_recorded_stdout_failure_before_main_thread_handles_it() -> None:
+    original_raise_failure_if_needed = _run_module.raise_failure_if_needed
+    failure_recorded = Event()
+    delay_once = Event()
+
+    def delayed_raise_failure_if_needed(process: Any, reader_threads: Any, state: Any) -> None:
+        if state.failure_state.error is not None and not delay_once.is_set():
+            failure_recorded.set()
+            delay_once.set()
+            time.sleep(0.05)
+        return original_raise_failure_if_needed(process, reader_threads, state)
+
+    def stdout_callback(_: str) -> None:
+        raise RuntimeError('stdout callback exploded before timeout handling')
+
+    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed):
+        with pytest.raises(RuntimeError, match='stdout callback exploded before timeout handling') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; print("hello", flush=True); time.sleep(5)',
+                split=False,
+                stdout_callback=stdout_callback,
+                timeout=0.01,
+            )
+
+    assert failure_recorded.is_set()
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
+
+
+def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it() -> None:
+    original_raise_failure_if_needed = _run_module.raise_failure_if_needed
+    failure_recorded = Event()
+    delay_once = Event()
+
+    def delayed_raise_failure_if_needed(process: Any, reader_threads: Any, state: Any) -> None:
+        if state.failure_state.error is not None and not delay_once.is_set():
+            failure_recorded.set()
+            delay_once.set()
+            time.sleep(0.05)
+        return original_raise_failure_if_needed(process, reader_threads, state)
+
+    def boom() -> bool:
+        raise RuntimeError('token exploded before timeout handling')
+
+    token = ConditionToken(boom, suppress_exceptions=False)
+
+    with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed):
+        with pytest.raises(RuntimeError, match='token exploded before timeout handling') as exc_info:
+            run(
+                sys.executable,
+                '-c',
+                'import time; time.sleep(5)',
+                split=False,
+                token=token,
+                timeout=0.01,
+            )
+
+    assert failure_recorded.is_set()
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
+
+
 def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them() -> None:
     def stdout_callback(_: str) -> None:
         raise RuntimeError('stdout callback exploded')

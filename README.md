@@ -256,6 +256,10 @@ If multiple failures happen concurrently, for example both callbacks raise at ne
 
 If a callback raises after the subprocess has already exited, the exception is still propagated, but the attached `result` may contain a successful `returncode`.
 
+If a timeout and another failure race with each other, the timeout may still win if it expires before a callback failure has been recorded. In that case, `suby` raises `TimeoutCancellationError` and the callback exception may not be observed.
+
+If a token exception has already been recorded before the timeout path wins the race, `suby` keeps propagating that token exception instead.
+
 </details>
 
 
