@@ -964,6 +964,65 @@ def test_result_assignment_failure_does_not_mask_original_exception() -> None:
         run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
 
 
+def test_attach_result_to_exception_handles_exception_without_dict() -> None:
+    class SlotOnlyError(RuntimeError):
+        __slots__ = ()
+
+    error = SlotOnlyError('slot-only')
+    result = SubprocessResult()
+    result.stdout = 'hello'
+    result.stderr = ''
+    result.returncode = 0
+
+    _run_module.attach_result_to_exception(error, result)
+
+    assert isinstance(error, SlotOnlyError)
+
+
+def test_attach_result_to_exception_handles_object_without_dict() -> None:
+    result = SubprocessResult()
+    result.stdout = 'hello'
+    result.stderr = ''
+    result.returncode = 0
+
+    _run_module.attach_result_to_exception(object(), result)  # type: ignore[arg-type]
+
+
+def test_raise_background_failure_ignores_wait_oserror_and_preserves_original_exception() -> None:
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.returncode = None
+
+        def poll(self) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+        def wait(self) -> None:
+            raise OSError('wait exploded')
+
+    class DummyThread:
+        def join(self) -> None:
+            return None
+
+    process = FakeProcess()
+    reader_threads = _run_module._ReaderThreads(stdout=DummyThread(), stderr=DummyThread(), process_waiter=DummyThread())
+    state = _run_module._ExecutionState()
+    state.stdout_buffer.append('partial-out')
+    state.stderr_buffer.append('partial-err')
+    error = RuntimeError('original background failure')
+
+    with pytest.raises(RuntimeError, match='original background failure') as exc_info:
+        _run_module.raise_background_failure(process, reader_threads, state, error)
+
+    assert exc_info.value is error
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'partial-out'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == 'partial-err'  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode == 1  # type: ignore[attr-defined]
+
+
 def test_slow_stdout_callback_does_not_prevent_completion() -> None:
     seen: List[str] = []
 

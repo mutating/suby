@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cantok import SimpleToken, TimeoutCancellationError
 
-from suby import run
+from suby import process_waiting, run
 from suby.process_waiting import (
     has_event_driven_wait,
     wait_for_process_exit,
@@ -212,8 +212,6 @@ def test_macos_wait_for_process_exit_passes_none_to_event_driven_waiter():
 @pytest.mark.skipif(not _is_macos, reason='macOS only')
 def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
     """The macOS kqueue waiter builds the expected exit subscription and closes the queue."""
-    import suby.process_waiting as process_waiting  # noqa: PLC0415
-
     mock_kqueue = MagicMock()
     mock_event = object()
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
@@ -5,7 +7,7 @@ from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
 from threading import Event, Lock, Thread
-from typing import IO, Any, Callable, List, Optional, Tuple, Union
+from typing import IO, Any, Callable, List, Optional, Tuple, Union, cast
 
 from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
 from emptylog import EmptyLogger, LoggerProtocol
@@ -179,13 +181,13 @@ def run_timeout_thread(process: Popen, timeout: Union[int, float], result: Subpr
 
 
 def run_stdout_thread(process: Popen, catch_output: bool, stdout_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
-    thread = Thread(target=read_stream, args=(process, process.stdout, state.stdout_buffer, catch_output, stdout_callback, token, state))
+    thread = Thread(target=read_stream, args=(process, cast(IO[str], process.stdout), state.stdout_buffer, catch_output, stdout_callback, token, state))
     thread.start()
     return thread
 
 
 def run_stderr_thread(process: Popen, catch_output: bool, stderr_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
-    thread = Thread(target=read_stream, args=(process, process.stderr, state.stderr_buffer, catch_output, stderr_callback, token, state))
+    thread = Thread(target=read_stream, args=(process, cast(IO[str], process.stderr), state.stderr_buffer, catch_output, stderr_callback, token, state))
     thread.start()
     return thread
 
@@ -209,15 +211,13 @@ def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessR
 
 def read_stream(  # noqa: PLR0913
     process: Popen[str],
-    stream: Optional[IO[str]],
+    stream: IO[str],
     buffer: List[str],
     catch_output: bool,
     callback: Callable[[str], Any],
     token: AbstractToken,
     state: _ExecutionState,
 ) -> None:
-    if stream is None:
-        return
     while True:
         if state.failure_state.error is not None:
             break
