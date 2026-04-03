@@ -5,7 +5,7 @@ from suby.subprocess_result import SubprocessResult
 
 
 class ConditionCancellationError(CantokConditionCancellationError):
-    result: SubprocessResult
+    result: SubprocessResult  # pragma: no cover
 
 
 class RunningCommandError(Exception):
@@ -15,7 +15,7 @@ class RunningCommandError(Exception):
 
 
 class TimeoutCancellationError(CantokTimeoutCancellationError):
-    result: SubprocessResult
+    result: SubprocessResult  # pragma: no cover
 
 
 class WrongCommandError(Exception):
