@@ -82,7 +82,7 @@ It returns an object of the `SubprocessResult` class, which contains the followi
 
 - **id**: a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout**: a string containing the entire output of the command being run.
-- **stderr**: a string containing the entire stderr output of the command being run.
+- **stderr**: a string containing the entire stderr output of the command being run. If the subprocess fails to start at all, this field remains empty because no process stderr existed yet.
 - **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
 - **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
@@ -206,10 +206,12 @@ If you don't need these details, simply omit the logger argument.
 
 If you still prefer logging, you can use any object that implements the [logger protocol](https://github.com/pomponchik/emptylog?tab=readme-ov-file#universal-logger-protocol) from the [`emptylog`](https://github.com/pomponchik/emptylog) library, including ones from third-party libraries.
 
+If the subprocess cannot be started at all, `suby` logs a startup-specific message via `logger.exception(...)`. For example, a missing executable is logged as `The executable for the command "definitely_missing_command" was not found.`. Permission and other operating-system startup failures have dedicated startup messages too.
+
 
 ## Exceptions
 
-By default, `suby` raises exceptions in three cases:
+By default, `suby` raises exceptions in four cases:
 
 1. If the command exits with a return code not equal to `0`. In this case, a `RunningCommandError` exception will be raised:
 
@@ -223,9 +225,25 @@ except RunningCommandError as e:
     # > Error when executing the command "python -c 1/0".
 ```
 
-2. If you pass a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token is canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This feature](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
+2. If the subprocess cannot be started, `suby` raises `RunningCommandError` with a startup-specific message and chains the original `OSError` as `__cause__`. In this case, the attached `result.stdout` and `result.stderr` stay empty because the process never started:
 
-3. If a [timeout](#timeouts) you set for the operation expires.
+```python
+from suby import run, RunningCommandError
+
+try:
+    run('definitely_missing_command')
+except RunningCommandError as e:
+    print(e)
+    # > The executable for the command "definitely_missing_command" was not found.
+    print(type(e.__cause__))
+    # > <class 'FileNotFoundError'>
+    print(e.result.stderr)
+    # >
+```
+
+3. If you pass a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token is canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This feature](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
+
+4. If a [timeout](#timeouts) you set for the operation expires.
 
 You can prevent `suby` from raising these exceptions. To do this, set the `catch_exceptions` parameter to `True`:
 
