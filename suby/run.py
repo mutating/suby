@@ -105,7 +105,7 @@ def run(  # noqa: PLR0913, PLR0915
                 process_waiter=run_process_waiter_thread(process, state),
             )
             if use_event_driven_timeout:
-                timeout_thread = run_timeout_thread(process, timeout, state.result)  # type: ignore[arg-type]  # pragma: no cover
+                timeout_thread = run_timeout_thread(process, timeout, state.result)  # type: ignore[arg-type]
 
             while True:
                 raise_failure_if_needed(process, reader_threads, state)
@@ -127,7 +127,7 @@ def run(  # noqa: PLR0913, PLR0915
             join_reader_threads(reader_threads)
             raise_failure_if_needed(process, reader_threads, state)
             if use_event_driven_timeout:
-                timeout_thread.join()  # pragma: no cover
+                timeout_thread.join()
 
     except FileNotFoundError as e:
         fill_startup_failure_result(state.result, e)
