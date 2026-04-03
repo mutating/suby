@@ -50,7 +50,7 @@ def wait_for_process_exit(process: 'Popen[str]', timeout_seconds: Optional[float
     if _event_driven_waiter is not None:
         try:
             _event_driven_waiter(process.pid, timeout_seconds)
-            return
+            return  # pragma: no cover (Linux and <py39)
         except OSError:
             pass
     if timeout_seconds is None:
