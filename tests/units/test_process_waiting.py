@@ -404,7 +404,7 @@ def test_killed_process_returncode_matches_platform_contract():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only pidfd skip policy check')
 def test_linux_pidfd_simulation_tests_are_not_applicable_on_windows():
-    """pidfd is Linux-only, so Windows should treat the simulated pidfd tests as non-applicable."""
+    """Windows disables the Linux pidfd/event-driven wait flags, so pidfd simulation tests stay non-applicable there."""
     assert _is_linux is False
     assert _has_pidfd is False
     assert has_event_driven_wait() is False

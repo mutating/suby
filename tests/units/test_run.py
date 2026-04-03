@@ -1093,7 +1093,7 @@ def _python_print_argv_script() -> str:
     ],
 )
 def test_malformed_commands_are_rejected(command):
-    """Checks that malformed commands are rejected."""
+    """Empty, whitespace-only, quote-only, and unterminated quoted command strings are rejected."""
     with pytest.raises(WrongCommandError):
         run(*command)
 
@@ -1162,19 +1162,19 @@ def test_very_large_stderr_output_is_handled_without_a_huge_command_line():
 
 
 def test_command_with_nul_byte_is_rejected_consistently():
-    """Checks that command with NUL byte is rejected consistently."""
+    """A command string containing NUL is rejected as RunningCommandError or ValueError, depending on platform."""
     with pytest.raises((RunningCommandError, ValueError)):
         run('abc\0def')
 
 
 def test_empty_path_object_is_rejected_consistently():
-    """Checks that empty path object is rejected consistently."""
+    """An empty Path executable is rejected as RunningCommandError or PermissionError, depending on platform."""
     with pytest.raises((RunningCommandError, PermissionError)):
         run(Path(''))  # noqa: PTH201
 
 
 def test_current_directory_path_object_is_rejected_consistently():
-    """Checks that current directory path object is rejected consistently."""
+    """Executing Path('.') raises RunningCommandError and preserves the startup OSError as __cause__."""
     with pytest.raises(RunningCommandError) as exc_info:
         run(Path('.'))  # noqa: PTH201
 
@@ -1271,7 +1271,7 @@ def test_split_false_does_not_split_single_string_command():
     ],
 )
 def test_split_false_preserves_argument_shape(arguments, run_kwargs, expected_stdout):
-    """Checks that split=False preserves argument shape."""
+    """With split=False, spaces, backslashes, quotes, and multi-argument argv shapes are passed through unchanged."""
     result = run(
         sys.executable,
         '-c',
@@ -1286,7 +1286,7 @@ def test_split_false_preserves_argument_shape(arguments, run_kwargs, expected_st
 
 
 def test_split_false_with_empty_executable_is_rejected():
-    """Checks that split=False with empty executable is rejected."""
+    """With split=False, an empty executable is rejected as RunningCommandError or ValueError."""
     with pytest.raises((RunningCommandError, ValueError)):
         run('', split=False)
 
@@ -1300,10 +1300,14 @@ def test_split_false_with_path_object_still_executes():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path semantics')
 def test_unc_path_survives_windows_processing():
-    """A malformed or unavailable UNC command still returns a regular result object in catch_exceptions mode."""
+    """With catch_exceptions=True, an unavailable UNC executable returns a startup-failure result with empty streams."""
     result = run(r'\\server\share\python.exe -c pass', catch_exceptions=True)
 
-    assert result.stderr is not None
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert result.returncode == 1
+    assert result.killed_by_token is False
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path parsing')
@@ -1353,7 +1357,7 @@ def test_posix_file_startup_failures_are_normalized_via_running_command_error(
     mode,
     expected_cause,
 ):
-    """Checks that posix file startup failures are normalized via RunningCommandError."""
+    """POSIX startup failures for unreadable scripts, missing shebangs, and missing interpreters preserve __cause__."""
     script = tmp_path / filename
     script.write_text(contents)
     script.chmod(mode)

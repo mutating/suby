@@ -10,6 +10,7 @@ from emptylog import MemoryLogger
 from full_match import match
 
 from suby import RunningCommandError, TimeoutCancellationError, run
+from suby.subprocess_result import SubprocessResult
 
 
 def test_run_hello_world():
@@ -175,9 +176,11 @@ def test_catch_exceptions_with_timeout_returns_result():
 
 
 def test_timeout_cancellation_error_carries_result():
-    """Checks that TimeoutCancellationError carries result."""
-    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
+    """TimeoutCancellationError carries a result object and keeps the documented timeout-expired message."""
+    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')) as exc_info:
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
+
+    assert isinstance(exc_info.value.result, SubprocessResult)
 
 
 def test_timeout_cancellation_error_result_fields():
@@ -239,7 +242,7 @@ def test_condition_token_result_repr():
 
 
 def test_timeout_raises_timeout_cancellation_error():
-    """Checks that timeout raises TimeoutCancellationError."""
+    """A timeout raises TimeoutCancellationError with the documented timeout-expired message."""
     with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
