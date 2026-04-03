@@ -633,6 +633,53 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
+def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_second():
+    from threading import current_thread, main_thread  # noqa: PLC0415
+
+    callback_failure_saved = Event()
+    token_check_started = Event()
+    original_failure_set = _run_module._FailureState.set
+
+    def instrumented_failure_set(self: Any, error: Exception):
+        was_saved = original_failure_set(self, error)
+        if was_saved and str(error) == 'stdout callback exploded first':
+            callback_failure_saved.set()
+        return was_saved
+
+    def stdout_callback(_: str):
+        if not token_check_started.wait(timeout=1):
+            raise RuntimeError('coordinated callback setup failed')
+        raise RuntimeError('stdout callback exploded first')
+
+    def token_boom_after_callback_failure() -> bool:
+        if current_thread() is not main_thread():
+            return False
+
+        token_check_started.set()
+        if not callback_failure_saved.wait(timeout=1):
+            raise RuntimeError('coordinated token setup failed')
+        raise RuntimeError('token exploded second')
+
+    token = ConditionToken(token_boom_after_callback_failure, suppress_exceptions=False)
+
+    with patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("hello", flush=True); time.sleep(5)',
+            split=False,
+            stdout_callback=stdout_callback,
+            token=token,
+        )
+
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
+    assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
+
+
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
