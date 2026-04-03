@@ -150,7 +150,7 @@ def test_run_accepts_valid_stdout_and_stderr_callbacks() -> None:
     run('python -c pass', stderr_callback=callback_with_wider_input)
     run('python -c pass', stdout_callback=CallableCallback())
     run('python -c pass', stderr_callback=CallableCallback())
-    run('python -c pass', stdout_callback=lambda line: None, stderr_callback=lambda line: None)
+    run('python -c pass', stdout_callback=lambda _line: None, stderr_callback=lambda _line: None)
 
 
 @pytest.mark.mypy_testing
@@ -250,11 +250,11 @@ def test_run_result_and_result_fields_have_expected_types() -> None:
     reveal_type(result.returncode)  # R: Union[builtins.int, None]
     reveal_type(result.killed_by_token)  # R: builtins.bool
 
-    explicit_result: SubprocessResult = run('python -c pass')
-    optional_stdout: str | None = result.stdout
-    optional_stderr: str | None = result.stderr
-    optional_returncode: int | None = result.returncode
-    killed_by_token: bool = result.killed_by_token
+    _explicit_result: SubprocessResult = run('python -c pass')
+    _optional_stdout: str | None = result.stdout
+    _optional_stderr: str | None = result.stderr
+    _optional_returncode: int | None = result.returncode
+    _killed_by_token: bool = result.killed_by_token
 
     if result.stdout is not None:
         result.stdout.upper()
@@ -269,12 +269,12 @@ def test_run_result_optional_fields_require_none_checks() -> None:
     """stdout, stderr, and returncode are Optional fields, so mypy requires None checks before treating them as concrete values."""
     result = run('python -c pass')
 
-    stdout: str = result.stdout  # E: [assignment]
-    stderr: str = result.stderr  # E: [assignment]
-    returncode: int = result.returncode  # E: [assignment]
+    _stdout: str = result.stdout  # E: [assignment]
+    _stderr: str = result.stderr  # E: [assignment]
+    _returncode: int = result.returncode  # E: [assignment]
     result.stdout.upper()  # E: [union-attr]
     result.stderr.upper()  # E: [union-attr]
-    killed_by_token: str = result.killed_by_token  # E: [assignment]
+    _killed_by_token: str = result.killed_by_token  # E: [assignment]
 
 
 @pytest.mark.mypy_testing
