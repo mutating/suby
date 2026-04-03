@@ -22,21 +22,24 @@ if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):
 
     _event_driven_waiter = _wait_pidfd
 
-elif sys.platform == 'darwin' and hasattr(select, 'kqueue'):  # pragma: no cover (!Darwin)
-    def _wait_kqueue(pid: int, timeout_seconds: Optional[float]) -> None:
-        kq = select.kqueue()
-        try:
-            ev = select.kevent(
-                pid,
-                filter=select.KQ_FILTER_PROC,
-                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                fflags=select.KQ_NOTE_EXIT,
-            )
-            kq.control([ev], 1, timeout_seconds)
-        finally:
-            kq.close()
+elif sys.platform == 'darwin':
+    if not hasattr(select, 'kqueue'):  # pragma: no cover (Darwin)
+        _event_driven_waiter = None
+    else:
+        def _wait_kqueue(pid: int, timeout_seconds: Optional[float]) -> None:  # pragma: no cover (!Darwin)
+            kq = select.kqueue()
+            try:
+                ev = select.kevent(
+                    pid,
+                    filter=select.KQ_FILTER_PROC,
+                    flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                    fflags=select.KQ_NOTE_EXIT,
+                )
+                kq.control([ev], 1, timeout_seconds)
+            finally:
+                kq.close()
 
-    _event_driven_waiter = _wait_kqueue
+        _event_driven_waiter = _wait_kqueue
 
 
 def has_event_driven_wait() -> bool:
