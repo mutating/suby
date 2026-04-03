@@ -47,7 +47,7 @@ keywords = [
 "suby" = ["py.typed"]
 
 [tool.mutmut]
-paths_to_mutate="suby"
+paths_to_mutate=["suby"]
 runner="pytest"
 
 [tool.ruff]
