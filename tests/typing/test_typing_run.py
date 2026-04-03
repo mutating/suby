@@ -1,12 +1,17 @@
 from pathlib import Path, PurePath
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, Tuple, TypedDict, Union
 
 import pytest
 from cantok import AbstractToken, ConditionToken, DefaultToken, SimpleToken
 from emptylog import EmptyLogger, MemoryLogger
 
 import suby
-from suby import run
+from suby import (
+    ConditionCancellationError,
+    RunningCommandError,
+    TimeoutCancellationError,
+    run,
+)
 from suby.subprocess_result import SubprocessResult
 
 
@@ -25,8 +30,8 @@ def test_run_accepts_string_and_path_arguments() -> None:
     run(Path('python'), '-c', 'pass')
     run(Path('python'), Path('script.py'))
 
-    string_args: tuple[str, ...] = ('python', '-c', 'pass')
-    mixed_args: tuple[str | Path, ...] = (Path('python'), '-c', 'pass')
+    string_args: Tuple[str, ...] = ('python', '-c', 'pass')
+    mixed_args: Tuple[Union[str, Path], ...] = (Path('python'), '-c', 'pass')
     run(*string_args)
     run(*mixed_args)
 
@@ -40,10 +45,10 @@ def test_run_rejects_non_string_non_path_arguments() -> None:
     run(None)  # E: [arg-type]
     run(PurePath('python'))  # E: [arg-type]
 
-    object_args: tuple[object, ...] = ('python', '-c', 'pass')
+    object_args: Tuple[object, ...] = ('python', '-c', 'pass')
     run(*object_args)  # E: [arg-type]
 
-    bytes_args: tuple[bytes, ...] = (b'python',)
+    bytes_args: Tuple[bytes, ...] = (b'python',)
     run(*bytes_args)  # E: [arg-type]
 
 
@@ -89,7 +94,7 @@ def test_run_rejects_keyword_flags_passed_positionally() -> None:
 
 @pytest.mark.mypy_testing
 def test_run_accepts_valid_logger_objects() -> None:
-    """Built-in loggers and structural LoggerProtocol implementations are accepted."""
+    """emptylog loggers and structural LoggerProtocol implementations are accepted."""
     class CustomLogger:
         def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
             pass
@@ -177,8 +182,8 @@ def test_run_rejects_callbacks_with_invalid_signatures() -> None:
 
 @pytest.mark.mypy_testing
 def test_run_accepts_valid_timeout_values() -> None:
-    """timeout accepts None, int, float, and variables typed as int | float | None."""
-    maybe_timeout: int | float | None = 1
+    """timeout accepts None, int, float, and variables typed as Union[int, float, None]."""
+    maybe_timeout: Union[int, float, None] = 1
 
     run('python -c pass', timeout=None)
     run('python -c pass', timeout=1)
@@ -199,7 +204,7 @@ def test_run_rejects_invalid_timeout_types() -> None:
 def test_run_accepts_valid_tokens() -> None:
     """token accepts AbstractToken instances, concrete cantok tokens, unions of token subclasses, and custom subclasses."""
     token: AbstractToken = SimpleToken()
-    union_token: SimpleToken | ConditionToken = SimpleToken()
+    union_token: Union[SimpleToken, ConditionToken] = SimpleToken()
 
     class CustomToken(AbstractToken):
         def _superpower(self) -> bool:
@@ -251,9 +256,9 @@ def test_run_result_and_result_fields_have_expected_types() -> None:
     reveal_type(result.killed_by_token)  # R: builtins.bool
 
     _explicit_result: SubprocessResult = run('python -c pass')
-    _optional_stdout: str | None = result.stdout
-    _optional_stderr: str | None = result.stderr
-    _optional_returncode: int | None = result.returncode
+    _optional_stdout: Optional[str] = result.stdout
+    _optional_stderr: Optional[str] = result.stderr
+    _optional_returncode: Optional[int] = result.returncode
     _killed_by_token: bool = result.killed_by_token
 
     if result.stdout is not None:
@@ -290,7 +295,7 @@ def test_run_can_be_imported_from_package_root_and_module() -> None:
 @pytest.mark.mypy_testing
 def test_run_accepts_optional_values_after_explicit_narrowing() -> None:
     """Optional command and token values become valid arguments after an explicit is not None check."""
-    maybe_command: str | Path | None = 'python -c pass'
+    maybe_command: Optional[Union[str, Path]] = 'python -c pass'
     maybe_token: Optional[AbstractToken] = SimpleToken()
 
     if maybe_command is not None:
@@ -303,7 +308,7 @@ def test_run_accepts_optional_values_after_explicit_narrowing() -> None:
 @pytest.mark.mypy_testing
 def test_run_rejects_optional_values_without_explicit_narrowing() -> None:
     """Optional command and token values are rejected until the None branch is ruled out."""
-    maybe_command: str | None = 'python -c pass'
+    maybe_command: Optional[str] = 'python -c pass'
     maybe_token: Optional[AbstractToken] = SimpleToken()
 
     run(maybe_command)  # E: [arg-type]
@@ -318,7 +323,7 @@ def test_run_accepts_valid_typed_kwargs_unpacking() -> None:
         catch_exceptions: bool
         split: bool
         double_backslash: bool
-        timeout: int | float | None
+        timeout: Union[int, float, None]
 
     kwargs: RunKwargs = {
         'catch_output': True,
@@ -366,3 +371,22 @@ def test_run_known_typing_gaps_are_currently_accepted() -> None:
     run()
     run('python -c pass', timeout=True)
     run('python -c pass', stdout_callback=async_callback)
+
+
+@pytest.mark.mypy_testing
+def test_suby_exceptions_expose_subprocess_result_type() -> None:
+    """Documented suby exceptions expose `.result` as SubprocessResult in static typing."""
+    try:
+        run('python -c pass')
+    except RunningCommandError as error:
+        reveal_type(error.result)  # R: suby.subprocess_result.SubprocessResult
+
+    try:
+        run('python -c pass')
+    except TimeoutCancellationError as error:
+        reveal_type(error.result)  # R: suby.subprocess_result.SubprocessResult
+
+    try:
+        run('python -c pass')
+    except ConditionCancellationError as error:
+        reveal_type(error.result)  # R: suby.subprocess_result.SubprocessResult

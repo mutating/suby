@@ -7,14 +7,20 @@ from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
 from threading import Event, Lock, Thread
-from types import MappingProxyType
-from typing import IO, Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import IO, Any, Callable, Dict, List, Mapping, Optional, Tuple, Union, cast
 
 from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
+from cantok import ConditionCancellationError as CantokConditionCancellationError
+from cantok import TimeoutCancellationError as CantokTimeoutCancellationError
 from emptylog import EmptyLogger, LoggerProtocol
 
 from suby.callbacks import stderr_with_flush, stdout_with_flush
-from suby.errors import RunningCommandError, WrongCommandError
+from suby.errors import (
+    ConditionCancellationError,
+    RunningCommandError,
+    TimeoutCancellationError,
+    WrongCommandError,
+)
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
@@ -159,6 +165,7 @@ def run(  # noqa: PLR0913, PLR0915
                 try:
                     token.check()
                 except CancellationError as e:
+                    normalize_cancellation_error(e)
                     e.result = state.result  # type: ignore[attr-defined]
                     raise
             else:
@@ -342,10 +349,17 @@ def attach_result_to_exception(error: BaseException, result: SubprocessResult) -
     if 'result' in error_dict:
         return
 
-    if any('result' in cast(MappingProxyType[str, object], cls.__dict__) for cls in type(error).__mro__):
+    if any('result' in cast(Mapping[str, object], cls.__dict__) for cls in type(error).__mro__):
         return
 
     try:
         error.result = result  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
         pass
+
+
+def normalize_cancellation_error(error: CancellationError) -> None:
+    if type(error) is CantokConditionCancellationError:
+        error.__class__ = ConditionCancellationError
+    elif type(error) is CantokTimeoutCancellationError:
+        error.__class__ = TimeoutCancellationError
