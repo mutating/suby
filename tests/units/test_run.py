@@ -169,10 +169,7 @@ def test_timeout_without_catching_exception(command, assert_no_suby_thread_leaks
 )
 def test_exception_in_subprocess_without_catching(command, error_text, assert_no_suby_thread_leaks):
     """With catch_exceptions=False, a non-zero subprocess exit raises RunningCommandError with the captured result."""
-    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError, match=re.escape(error_text)):
-        run(*command)
-
-    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError, match=re.escape(error_text)) as exc_info:
         run(*command)
 
     assert exc_info.value.result.stdout == ''
@@ -1014,7 +1011,7 @@ def test_errors_are_importable_from_suby(error_name):
 
 
 def test_already_cancelled_simple_token_kills_process():
-    """An already-cancelled token stops the process and returns killed_by_token=True with a non-zero returncode."""
+    """With catch_exceptions=True, an already-cancelled token returns killed_by_token=True and a non-zero returncode."""
     token = SimpleToken()
     token.cancel()
 
@@ -1034,7 +1031,7 @@ def test_already_cancelled_simple_token_raises():
 
 
 def test_immediately_satisfied_condition_token_kills_process():
-    """A token whose condition is already true stops the process and returns a killed result."""
+    """With catch_exceptions=True, a token whose condition is already true returns a killed result."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
@@ -1821,7 +1818,7 @@ def test_callback_that_prints_does_not_deadlock():
     ],
 )
 def test_callbacks_must_be_callable(run_kwargs, command):
-    """stdout_callback and stderr_callback must be callable objects."""
+    """stdout_callback and stderr_callback must be callable objects, otherwise run() raises TypeError."""
     with pytest.raises(TypeError):
         run(sys.executable, '-c', command, split=False, **run_kwargs)  # type: ignore[arg-type]
 

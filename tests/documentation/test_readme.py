@@ -213,7 +213,7 @@ def test_timeout_cancellation_error_result_repr():
 
 
 def test_condition_token_raises_when_cancelled():
-    """When the cancellation condition is immediately true, run() raises ConditionCancellationError."""
+    """With default catch_exceptions=False, an immediately true cancellation condition raises ConditionCancellationError."""
     token = ConditionToken(lambda: True)
 
     with pytest.raises(ConditionCancellationError):

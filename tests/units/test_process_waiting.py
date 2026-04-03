@@ -404,7 +404,7 @@ def test_killed_process_returncode_matches_platform_contract():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only pidfd skip policy check')
 def test_windows_has_no_event_driven_wait_capability():
-    """On Windows, the OS-notification wait feature flags are all False, so the implementation uses the fallback waiter."""
+    """On Windows, the OS-notification wait capability flags are all False."""
     assert _is_linux is False
     assert _has_pidfd is False
     assert has_event_driven_wait() is False
@@ -833,7 +833,7 @@ def test_stderr_callback_not_called_after_stdout_failure_is_recorded(assert_no_s
 
 
 def test_result_excludes_stderr_after_stdout_callback_failure(assert_no_suby_thread_leaks):
-    """After a stdout callback failure is recorded, later stderr emitted by the process is not appended to the result."""
+    """After the stdout reader thread stores a callback failure, stderr written later by the process is not appended."""
     failure_recorded = Event()
     original_failure_set = _run_module._FailureState.set
 
@@ -908,7 +908,7 @@ def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_sub
 
 
 def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread_leaks):
-    """The shared failure-state slot serializes writes with a lock, while reads intentionally remain lock-free."""
+    """The shared _FailureState.error field serializes writes with a lock, while reads intentionally remain lock-free."""
     locklib = pytest.importorskip('locklib')
     traced_locks = []
 
@@ -946,7 +946,7 @@ def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
-    """The timeout helper may finish cancellation before a background stdout callback failure gets stored.
+    """The timeout helper may finish cancellation before the stdout reader thread stores its callback exception.
 
     The kill return code assertion is platform-dependent: POSIX reports SIGKILL as -9, while Windows uses a
     different non-zero process exit code.
@@ -999,7 +999,7 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
 
 
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it():
-    """Timeout cancellation and a just-recorded token-condition failure can overlap before the main loop handles the error."""
+    """Timeout cancellation and a just-stored token-condition exception can overlap before run()'s main coordination loop handles it."""
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
