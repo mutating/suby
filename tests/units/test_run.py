@@ -676,9 +676,7 @@ def test_missing_command_with_catch_exceptions_returns_filled_result():
     result = run('command_that_definitely_does_not_exist_12345', catch_exceptions=True)
 
     assert result.stdout == ''
-    assert result.stderr != ''
-    if sys.platform != 'win32':
-        assert 'command_that_definitely_does_not_exist_12345' in result.stderr
+    assert result.stderr == ''
     assert result.returncode == 1
     assert result.killed_by_token is False
 
@@ -689,24 +687,18 @@ def test_missing_command_without_catch_exceptions_attaches_filled_result():
         run('command_that_definitely_does_not_exist_12345')
 
     assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr != ''
-    if sys.platform != 'win32':
-        assert 'command_that_definitely_does_not_exist_12345' in exc_info.value.result.stderr
+    assert exc_info.value.result.stderr == ''
     assert exc_info.value.result.returncode == 1
     assert exc_info.value.result.killed_by_token is False
 
 
 def test_missing_command_stderr_shape_matches_current_platform():
-    """POSIX includes the missing command in stderr, while Windows may only expose WinError text for now."""
+    """Startup FileNotFoundError is not process stderr, so stderr stays empty on every platform."""
     missing_command = 'command_that_definitely_does_not_exist_12345'
     result = run(missing_command, catch_exceptions=True)
 
     assert result.stdout == ''
-    assert result.stderr != ''
-    if sys.platform == 'win32':
-        assert 'WinError' in result.stderr
-    else:
-        assert missing_command in result.stderr
+    assert result.stderr == ''
     assert result.returncode == 1
     assert result.killed_by_token is False
 
@@ -757,8 +749,7 @@ def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
     result = run(str(script), catch_exceptions=True)
 
     assert result.stdout == ''
-    assert result.stderr != ''
-    assert 'Permission denied' in result.stderr
+    assert result.stderr == ''
     assert result.returncode == 1
     assert result.killed_by_token is False
 
@@ -774,8 +765,7 @@ def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_pa
         run(str(script))
 
     assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr != ''
-    assert 'Permission denied' in exc_info.value.result.stderr
+    assert exc_info.value.result.stderr == ''
     assert exc_info.value.result.returncode == 1
     assert exc_info.value.result.killed_by_token is False
 
@@ -940,7 +930,7 @@ def test_too_long_command_string_is_normalized_on_windows():
 
     assert isinstance(exc_info.value.__cause__, OSError)
     assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr != ''
+    assert exc_info.value.result.stderr == ''
     assert exc_info.value.result.returncode == 1
     assert exc_info.value.result.killed_by_token is False
 

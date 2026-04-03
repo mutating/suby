@@ -258,9 +258,9 @@ def fill_result(state: _ExecutionState, returncode: int) -> None:
     state.result.returncode = returncode
 
 
-def fill_startup_failure_result(result: SubprocessResult, error: OSError) -> None:
+def fill_startup_failure_result(result: SubprocessResult, _error: OSError) -> None:
     result.stdout = ''
-    result.stderr = str(error)
+    result.stderr = ''
     result.returncode = 1
 
 
