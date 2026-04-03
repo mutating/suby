@@ -384,6 +384,34 @@ def test_timeout_with_catch_exceptions():
     assert result.stderr == ''
 
 
+def test_run_timeout_thread_kills_running_process_and_marks_result():
+    """The timeout helper thread kills a real process and marks the result."""
+    process = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(1000)'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    result = SubprocessResult()
+    try:
+        timeout_thread = _run_module.run_timeout_thread(process, 0.01, result)
+        timeout_thread.join(timeout=2)
+
+        assert timeout_thread.is_alive() is False
+
+        process.wait(timeout=2)
+
+        assert process.returncode != 0
+        assert result.killed_by_token is True
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+
+
 def test_timeout_only_uses_timeout_thread_according_to_platform():
     """Timeout-only path uses the timeout thread only when event-driven waiting is available."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
