@@ -464,7 +464,7 @@ def test_timeout_wait_does_not_kill_already_finished_process():
 
 
 def test_timeout_only_uses_timeout_thread_according_to_platform():
-    """Timeout-only path uses the timeout thread only when event-driven waiting is available."""
+    """Timeout-only run() calls run_timeout_thread exactly once on event-driven platforms and never on fallback."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5)
@@ -502,7 +502,7 @@ def test_event_driven_fast_process_exit_detection():
     ],
 )
 def test_run_uses_process_waiter_thread(command, run_kwargs, expected_exception, expected_stdout):
-    """Process exit is always tracked by the waiter thread."""
+    """Each run() call starts one process-waiter thread and one reader thread per output stream."""
     with patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter, \
          patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as mock_stdout_thread, \
          patch.object(_run_module, 'run_stderr_thread', wraps=_run_module.run_stderr_thread) as mock_stderr_thread:
@@ -548,7 +548,7 @@ def test_process_killed_by_signal_during_wait():
 
 
 def test_rapid_sequential_timeout_calls():
-    """Rapid sequential calls with timeout don't leak resources."""
+    """Rapid sequential timeout-enabled calls should each complete successfully for a short-lived process."""
     for _ in range(10):
         result = run(_PASS_CMD, timeout=1, catch_output=True)
 
@@ -767,7 +767,7 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
 
 
 def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
-    """Checks that stderr callback has no side effect after stdout failure is recorded."""
+    """Once a stdout failure is recorded, later stderr lines should not be delivered to stderr_callback."""
     failure_recorded = Event()
     late_stderr_callbacks = []
     original_failure_set = _run_module._FailureState.set
@@ -1091,7 +1091,7 @@ def test_process_exit_and_near_exit_token_error_raise_token_error():
 
 
 def test_near_exit_token_error_keeps_kill_result_shape():
-    """Checks that near-exit token error keeps kill result shape.
+    """A near-exit token failure produces a killed-process return code while leaving killed_by_token=False.
 
     The exact kill return code is asserted only on POSIX, because Windows does not encode SIGKILL as -9.
     """
@@ -1126,7 +1126,7 @@ def test_near_exit_token_error_keeps_kill_result_shape():
 
 
 def test_timeout_and_stdout_callback_race_result_shape_is_observable():
-    """Checks that timeout and stdout callback race result shape is observable.
+    """A timeout/stdout-callback race still returns a killed-process return code and a boolean killed flag.
 
     The return code assertion branches by OS because only POSIX exposes a signal-based -9 exit status here.
     """

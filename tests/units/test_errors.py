@@ -5,7 +5,7 @@ from suby.subprocess_result import SubprocessResult
 
 
 def test_init_exception_and_raise():
-    """Checks that init exception and raise."""
+    """RunningCommandError preserves the message and the attached SubprocessResult when raised."""
     result = SubprocessResult()
     with pytest.raises(RunningCommandError) as exc_info:
         raise RunningCommandError('kek', result)

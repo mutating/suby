@@ -15,7 +15,7 @@ def test_generated_id_has_expected_shape_and_is_unique():
 
 
 def test_default_values():
-    """Checks that default values."""
+    """A fresh SubprocessResult starts with empty process fields and killed_by_token=False."""
     assert SubprocessResult().stdout is None
     assert SubprocessResult().stderr is None
     assert SubprocessResult().returncode is None
@@ -23,7 +23,7 @@ def test_default_values():
 
 
 def test_repr_format():
-    """Checks that repr format."""
+    """repr(SubprocessResult) includes the id and all public result fields in the expected format."""
     result = SubprocessResult()
     result.stdout = 'hello'
     result.stderr = ''

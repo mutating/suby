@@ -13,7 +13,7 @@ from suby import RunningCommandError, TimeoutCancellationError, run
 
 
 def test_run_hello_world():
-    """Checks that run hello world."""
+    """The hello-world command is echoed to stdout, captured in result.stdout, and leaves stderr empty."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -30,7 +30,7 @@ def test_run_hello_world():
 
 
 def test_result_repr_format():
-    """Checks that result repr format."""
+    """The README result example should keep the documented SubprocessResult repr format."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -44,7 +44,7 @@ def test_result_repr_format():
 
 
 def test_path_object_as_argument():
-    """Checks that path object as argument."""
+    """A Path executable argument works in the README example and prints the expected output."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -56,7 +56,7 @@ def test_path_object_as_argument():
 
 
 def test_split_false():
-    """Checks that split=False."""
+    """With split=False, each command argument is passed as-is and the README example still runs."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -69,7 +69,7 @@ def test_split_false():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_backslashes_preserved_by_default_on_windows():
-    """Checks that backslashes preserved by default on windows."""
+    """On Windows, default command parsing preserves backslashes in the Python executable path."""
     result = run(f'{sys.executable} -c "print(777)"', catch_output=True)
 
     assert result.returncode == 0
@@ -78,14 +78,14 @@ def test_backslashes_preserved_by_default_on_windows():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_double_backslash_can_be_disabled_on_windows():
-    """Checks that double backslash can be disabled on windows."""
+    """On Windows, disabling double_backslash should make backslash-heavy commands fail with RunningCommandError."""
     with pytest.raises(RunningCommandError):
         run(f'{sys.executable} -c pass', double_backslash=False)
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
 def test_double_backslash_can_be_enabled_on_non_windows():
-    """Checks that double backslash can be enabled on non windows."""
+    """On non-Windows platforms, double_backslash=True preserves a literal backslash in the parsed argument."""
     result = run(
         sys.executable,
         '-c "import sys; print(sys.argv[1])"',
@@ -118,7 +118,7 @@ def test_stdout_callback_replaces_default_output():
 
 
 def test_catch_output_suppresses_console_output():
-    """Checks that catch output suppresses console output."""
+    """catch_output=True suppresses console output while still storing stdout in the result object."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -131,7 +131,7 @@ def test_catch_output_suppresses_console_output():
 
 
 def test_logging_on_success():
-    """Checks that logging on success."""
+    """A successful README command logs one INFO message at start and one INFO message at completion."""
     logger = MemoryLogger()
 
     run('python -c pass', logger=logger, catch_output=True)
@@ -143,7 +143,7 @@ def test_logging_on_success():
 
 
 def test_logging_on_error():
-    """Checks that logging on error."""
+    """A failing README command with catch_exceptions=True logs INFO at start and ERROR at failure."""
     logger = MemoryLogger()
 
     run('python -c "raise ValueError"', logger=logger, catch_exceptions=True, catch_output=True)
@@ -155,7 +155,7 @@ def test_logging_on_error():
 
 
 def test_running_command_error_message_is_printed():
-    """Checks that RunningCommandError message is printed."""
+    """str(RunningCommandError) matches the README's documented execution-failure message."""
     try:
         run('python -c 1/0', catch_output=True)
     except RunningCommandError as e:
@@ -165,7 +165,7 @@ def test_running_command_error_message_is_printed():
 
 
 def test_catch_exceptions_with_timeout_returns_result():
-    """Checks that catch exceptions with timeout returns result."""
+    """With catch_exceptions=True, a timeout returns a result object with empty output and a non-zero return code."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert result.stdout == ''
@@ -181,7 +181,7 @@ def test_timeout_cancellation_error_carries_result():
 
 
 def test_timeout_cancellation_error_result_fields():
-    """Checks that TimeoutCancellationError result fields."""
+    """TimeoutCancellationError.result carries empty output, a non-zero return code, and killed_by_token=True."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -194,7 +194,7 @@ def test_timeout_cancellation_error_result_fields():
 
 
 def test_timeout_cancellation_error_result_repr():
-    """Checks that TimeoutCancellationError result repr."""
+    """TimeoutCancellationError.result keeps the documented SubprocessResult repr shape."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -215,7 +215,7 @@ def test_condition_token_raises_when_cancelled():
 
 
 def test_condition_token_with_catch_exceptions_returns_result():
-    """Checks that ConditionToken with catch exceptions returns result."""
+    """With catch_exceptions=True, a cancelled ConditionToken returns a killed result instead of raising."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
@@ -227,7 +227,7 @@ def test_condition_token_with_catch_exceptions_returns_result():
 
 
 def test_condition_token_result_repr():
-    """Checks that ConditionToken result repr."""
+    """The result returned after ConditionToken cancellation keeps the documented repr shape."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
@@ -245,7 +245,7 @@ def test_timeout_raises_timeout_cancellation_error():
 
 
 def test_timeout_error_message():
-    """Checks that timeout error message."""
+    """TimeoutCancellationError's message should mention that the timeout in seconds has expired."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -255,7 +255,7 @@ def test_timeout_error_message():
 
 
 def test_timeout_with_catch_exceptions_returns_result():
-    """Checks that timeout with catch exceptions returns result."""
+    """With catch_exceptions=True, timeout cancellation returns a killed result instead of raising."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert result.stdout == ''
@@ -265,7 +265,7 @@ def test_timeout_with_catch_exceptions_returns_result():
 
 
 def test_timeout_result_repr():
-    """Checks that timeout result repr."""
+    """The result returned after timeout cancellation keeps the documented repr shape."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert re.fullmatch(

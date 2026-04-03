@@ -14,7 +14,7 @@ from suby.callbacks import stderr_with_flush, stdout_with_flush
     ],
 )
 def test_output_with_flush(callback, expected_stdout, expected_stderr):
-    """Checks that output with flush."""
+    """Default callbacks write the text to their target stream and flush it immediately."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
