@@ -728,6 +728,38 @@ def test_missing_command_original_popen_raises_filenotfounderror():
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only FileNotFoundError message regression')
+def test_missing_command_name_is_preserved_in_running_command_error_on_windows():
+    """Checks that Windows startup FileNotFoundError keeps the missing command name in our exception message."""
+    missing_command = 'command_that_definitely_does_not_exist_12345'
+
+    with pytest.raises(
+        RunningCommandError,
+        match=match(f'The executable for the command "{missing_command}" was not found.'),
+    ) as exc_info:
+        run(missing_command)
+
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+    assert missing_command not in str(exc_info.value.__cause__)
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr == ''
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only FileNotFoundError message regression')
+def test_missing_command_name_is_preserved_in_exception_log_on_windows():
+    """Checks that Windows startup FileNotFoundError keeps the missing command name in logger.exception()."""
+    missing_command = 'command_that_definitely_does_not_exist_12345'
+    logger = MemoryLogger()
+
+    result = run(missing_command, catch_exceptions=True, logger=logger)
+
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert result.returncode == 1
+    assert len(logger.data.exception) == 1
+    assert logger.data.exception[0].message == f'The executable for the command "{missing_command}" was not found.'
+
+
 @pytest.mark.parametrize(
     ('startup_error', 'expected_message'),
     [
