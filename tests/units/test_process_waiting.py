@@ -1001,6 +1001,8 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it():
     """Timeout cancellation and a just-stored token-condition exception can overlap before run()'s main coordination loop handles it."""
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
+    timeout = 0.2
+    handling_delay = 0.3
     failure_recorded = Event()
     delay_once = Event()
 
@@ -1008,7 +1010,7 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
         if state.failure_state.error is not None and not delay_once.is_set():
             failure_recorded.set()
             delay_once.set()
-            time.sleep(0.05)
+            time.sleep(handling_delay)
         return original_raise_failure_if_needed(process, reader_threads, state)
 
     def boom() -> bool:
@@ -1024,7 +1026,7 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
             'import time; time.sleep(5)',
             split=False,
             token=token,
-            timeout=0.01,
+            timeout=timeout,
         )
 
     assert failure_recorded.is_set()
