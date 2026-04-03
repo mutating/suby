@@ -1,6 +1,7 @@
 import importlib
 import json
 import re
+import subprocess
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
@@ -30,6 +31,28 @@ from suby import RunningCommandError, WrongCommandError, run
 from suby.subprocess_result import SubprocessResult
 
 _run_module = importlib.import_module('suby.run')
+
+_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH = 32767
+
+
+def _assert_kill_returncode_matches_platform(returncode: int) -> None:
+    if sys.platform == 'win32':
+        assert returncode != 0
+    else:
+        assert returncode == -9
+
+
+def _windows_print_payload_for_command_line_length(target_command_line_length: int) -> str:
+    payload_length = target_command_line_length
+
+    while payload_length >= 0:
+        payload = 'x' * payload_length
+        command_line = subprocess.list2cmdline([sys.executable, '-c', f'print("{payload}")'])
+        if len(command_line) <= target_command_line_length:
+            return payload
+        payload_length -= len(command_line) - target_command_line_length
+
+    raise AssertionError('Failed to build a Windows command line payload within the requested length.')
 
 
 @pytest.mark.parametrize(
@@ -654,7 +677,8 @@ def test_missing_command_with_catch_exceptions_returns_filled_result():
 
     assert result.stdout == ''
     assert result.stderr != ''
-    assert 'command_that_definitely_does_not_exist_12345' in result.stderr
+    if sys.platform != 'win32':
+        assert 'command_that_definitely_does_not_exist_12345' in result.stderr
     assert result.returncode == 1
     assert result.killed_by_token is False
 
@@ -666,9 +690,25 @@ def test_missing_command_without_catch_exceptions_attaches_filled_result():
 
     assert exc_info.value.result.stdout == ''
     assert exc_info.value.result.stderr != ''
-    assert 'command_that_definitely_does_not_exist_12345' in exc_info.value.result.stderr
+    if sys.platform != 'win32':
+        assert 'command_that_definitely_does_not_exist_12345' in exc_info.value.result.stderr
     assert exc_info.value.result.returncode == 1
     assert exc_info.value.result.killed_by_token is False
+
+
+def test_missing_command_stderr_shape_matches_current_platform():
+    """POSIX includes the missing command in stderr, while Windows may only expose WinError text for now."""
+    missing_command = 'command_that_definitely_does_not_exist_12345'
+    result = run(missing_command, catch_exceptions=True)
+
+    assert result.stdout == ''
+    assert result.stderr != ''
+    if sys.platform == 'win32':
+        assert 'WinError' in result.stderr
+    else:
+        assert missing_command in result.stderr
+    assert result.returncode == 1
+    assert result.killed_by_token is False
 
 
 def test_missing_command_with_catch_exceptions_logs_exception():
@@ -865,11 +905,66 @@ def test_malformed_commands_are_rejected(command):
 
 
 def test_very_long_command_string_is_handled():
-    """Checks that very long command string is handled."""
-    payload = 'x' * 100_000
+    """Checks that very long command string is handled.
+
+    Windows has a much lower CreateProcess command line limit than POSIX, so the payload is capped there to the
+    longest command line accepted by the platform.
+    """
+    if sys.platform == 'win32':
+        payload = _windows_print_payload_for_command_line_length(_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH)
+    else:
+        payload = 'x' * 100_000
+
     result = run(sys.executable, '-c', f'print("{payload}")', split=False, catch_output=True)
 
     assert result.stdout == payload + '\n'
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only CreateProcess command line limit')
+def test_very_long_command_string_handles_values_below_windows_limit():
+    """A Windows command line just below the CreateProcess limit should still execute successfully."""
+    payload = _windows_print_payload_for_command_line_length(_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH - 128)
+
+    result = run(sys.executable, '-c', f'print("{payload}")', split=False, catch_output=True)
+
+    assert result.stdout == payload + '\n'
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only CreateProcess command line limit')
+def test_too_long_command_string_is_normalized_on_windows():
+    """Windows rejects command lines longer than 32767 chars, and suby should expose that as RunningCommandError."""
+    payload = _windows_print_payload_for_command_line_length(_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH) + 'x'
+
+    with pytest.raises(RunningCommandError) as exc_info:
+        run(sys.executable, '-c', f'print("{payload}")', split=False, catch_output=True)
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr != ''
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
+def test_very_large_output_is_handled_without_a_huge_command_line():
+    """Checks that very large output is captured when the command line itself stays short."""
+    payload_size = 100_000
+    result = run(sys.executable, '-c', f'print("x" * {payload_size})', split=False, catch_output=True)
+
+    assert result.stdout == 'x' * payload_size + '\n'
+
+
+def test_very_large_stderr_output_is_handled_without_a_huge_command_line():
+    """Checks that very large stderr output is captured when the command line itself stays short."""
+    payload_size = 100_000
+    result = run(
+        sys.executable,
+        '-c',
+        f'import sys; sys.stderr.write("x" * {payload_size})',
+        split=False,
+        catch_output=True,
+    )
+
+    assert result.stderr == 'x' * payload_size
 
 
 def test_command_with_nul_byte_is_rejected_consistently():
@@ -1230,7 +1325,10 @@ def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them(assert_n
     ],
 )
 def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kwarg, command, error_message):
-    """Checks that timeout and callback error raise one of expected exceptions."""
+    """Checks that timeout and callback error raise one of expected exceptions.
+
+    The kill return code check is strict only on POSIX, because Windows does not use -9 for killed processes.
+    """
     returncodes = []
     killed_flags = set()
 
@@ -1259,7 +1357,8 @@ def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kw
         returncodes.append(result.returncode)
         killed_flags.add(result.killed_by_token)
 
-    assert returncodes == [-9, -9, -9, -9, -9]
+    for returncode in returncodes:
+        _assert_kill_returncode_matches_platform(returncode)
     assert killed_flags.issubset({False, True})
 
 
@@ -1290,7 +1389,11 @@ def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_except
     expected_stderr,
     error_message,
 ):
-    """Checks that timeout and callback error after near-exit raise one of expected exceptions."""
+    """Checks that timeout and callback error after near-exit raise one of expected exceptions.
+
+    The return code is validated with a platform-specific branch because POSIX and Windows report killed
+    processes differently.
+    """
     returncodes = []
     killed_flags = []
 
@@ -1326,7 +1429,8 @@ def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_except
         returncodes.append(result.returncode)
         killed_flags.append(result.killed_by_token)
 
-    assert returncodes == [-9, -9, -9, -9, -9]
+    for returncode in returncodes:
+        _assert_kill_returncode_matches_platform(returncode)
     assert killed_flags == [True, True, True, True, True]
 
 
@@ -1783,9 +1887,37 @@ def test_interleaved_stdout_and_stderr_are_both_collected():
 
 
 def test_non_utf8_output_is_rejected_or_normalized():
-    """Checks that non-UTF-8 output is rejected or normalized."""
-    with pytest.raises((UnicodeDecodeError, RunningCommandError)):
+    """Checks that non-UTF-8 output is rejected consistently under explicit UTF-8 strict decoding."""
+    with pytest.raises(UnicodeDecodeError):
         run(sys.executable, '-c', 'import os; os.write(1, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
+
+
+def test_non_utf8_stderr_is_rejected_consistently():
+    """Checks that non-UTF-8 stderr bytes are rejected consistently under explicit UTF-8 strict decoding."""
+    with pytest.raises(UnicodeDecodeError):
+        run(sys.executable, '-c', 'import os; os.write(2, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
+
+
+def test_utf8_stdout_accepts_non_ascii_text():
+    """Checks that explicit UTF-8 decoding preserves non-ASCII stdout text."""
+    result = run(sys.executable, '-c', 'print("привет")', split=False, catch_output=True)
+
+    assert result.stdout == 'привет\n'
+    assert result.returncode == 0
+
+
+def test_utf8_stderr_accepts_non_ascii_text():
+    """Checks that explicit UTF-8 decoding preserves non-ASCII stderr text."""
+    result = run(
+        sys.executable,
+        '-c',
+        'import sys; sys.stderr.write("привет\\n")',
+        split=False,
+        catch_output=True,
+    )
+
+    assert result.stderr == 'привет\n'
+    assert result.returncode == 0
 
 
 def test_complex_kwargs_combination_is_well_formed():

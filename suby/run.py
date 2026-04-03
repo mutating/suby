@@ -81,7 +81,15 @@ def run(  # noqa: PLR0913, PLR0915
     logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
     try:
-        with Popen(list(converted_arguments), stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True) as process:
+        with Popen(
+            list(converted_arguments),
+            stdout=PIPE,
+            stderr=PIPE,
+            bufsize=1,
+            text=True,
+            encoding='utf-8',
+            errors='strict',
+        ) as process:
             reader_threads = _ReaderThreads(
                 stdout=run_stdout_thread(process, catch_output, stdout_callback, token, state),
                 stderr=run_stderr_thread(process, catch_output, stderr_callback, token, state),

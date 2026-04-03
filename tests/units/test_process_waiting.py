@@ -36,6 +36,13 @@ _PRINT_CMD = f'{sys.executable} -c "print(\'hello\')"'
 _PASS_CMD = f'{sys.executable} -c pass'
 
 
+def _assert_kill_returncode_matches_platform(returncode: int) -> None:
+    if sys.platform == 'win32':
+        assert returncode != 0
+    else:
+        assert returncode == -9
+
+
 def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
     """Load a fresh process_waiting module as if it were imported on Linux with pidfd support."""
     module_path = Path(process_waiting.__file__)
@@ -275,6 +282,7 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
         process.wait()
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
 def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
     """The Linux pidfd waiter opens a pidfd, registers it with poll, converts timeout to ms, and closes it."""
     poller = MagicMock()
@@ -294,6 +302,7 @@ def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
     close.assert_called_once_with(123)
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
 def test_simulated_linux_pidfd_wait_passes_none_timeout_and_closes_fd():
     """The Linux pidfd waiter passes None through to poll() and still closes the pidfd."""
     poller = MagicMock()
@@ -310,6 +319,7 @@ def test_simulated_linux_pidfd_wait_passes_none_timeout_and_closes_fd():
     close.assert_called_once_with(123)
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
 def test_simulated_linux_pidfd_wait_closes_fd_when_poll_raises():
     """The Linux pidfd waiter closes the pidfd even if poll() raises an OSError."""
     poller = MagicMock()
@@ -382,6 +392,22 @@ def test_timeout_with_catch_exceptions():
     assert result.returncode != 0
     assert result.stdout == ''
     assert result.stderr == ''
+
+
+def test_killed_process_returncode_matches_platform_contract():
+    """Killed processes report -9 on POSIX, but only a non-zero exit code is guaranteed on Windows."""
+    result = run(_SLEEP_CMD, timeout=0.01, catch_exceptions=True)
+
+    _assert_kill_returncode_matches_platform(result.returncode)
+    assert result.killed_by_token is True
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only pidfd skip policy check')
+def test_linux_pidfd_simulation_tests_are_not_applicable_on_windows():
+    """pidfd is Linux-only, so Windows should treat the simulated pidfd tests as non-applicable."""
+    assert _is_linux is False
+    assert _has_pidfd is False
+    assert has_event_driven_wait() is False
 
 
 def test_run_timeout_thread_kills_running_process_and_marks_result():
@@ -896,7 +922,11 @@ def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
-    """Checks that timeout thread can win before stdout failure is recorded."""
+    """Checks that timeout thread can win before stdout failure is recorded.
+
+    The kill return code assertion is platform-dependent: POSIX reports SIGKILL as -9, while Windows uses a
+    different non-zero process exit code.
+    """
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
@@ -931,7 +961,7 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
         assert failure_recorded.is_set() is False
         assert result.stdout == ''
         assert result.stderr == ''
-        assert result.returncode == -9
+        _assert_kill_returncode_matches_platform(result.returncode)
         assert result.killed_by_token is True
     else:
 
@@ -940,7 +970,7 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
         assert failure_recorded.is_set() is True
         assert result.stdout == 'hello\n'
         assert isinstance(result.stderr, str)
-        assert result.returncode == -9
+        _assert_kill_returncode_matches_platform(result.returncode)
         assert result.killed_by_token in {False, True}
 
 
@@ -1061,7 +1091,10 @@ def test_process_exit_and_near_exit_token_error_raise_token_error():
 
 
 def test_near_exit_token_error_keeps_kill_result_shape():
-    """Checks that near-exit token error keeps kill result shape."""
+    """Checks that near-exit token error keeps kill result shape.
+
+    The exact kill return code is asserted only on POSIX, because Windows does not encode SIGKILL as -9.
+    """
     returncodes = []
     killed_flags = []
 
@@ -1087,12 +1120,16 @@ def test_near_exit_token_error_keeps_kill_result_shape():
         returncodes.append(exc_info.value.result.returncode)  # type: ignore[attr-defined]
         killed_flags.append(exc_info.value.result.killed_by_token)  # type: ignore[attr-defined]
 
-    assert returncodes == [-9, -9, -9, -9, -9]
+    for returncode in returncodes:
+        _assert_kill_returncode_matches_platform(returncode)
     assert killed_flags == [False, False, False, False, False]
 
 
 def test_timeout_and_stdout_callback_race_result_shape_is_observable():
-    """Checks that timeout and stdout callback race result shape is observable."""
+    """Checks that timeout and stdout callback race result shape is observable.
+
+    The return code assertion branches by OS because only POSIX exposes a signal-based -9 exit status here.
+    """
     returncodes = []
     killed_flags = []
 
@@ -1116,6 +1153,7 @@ def test_timeout_and_stdout_callback_race_result_shape_is_observable():
         returncodes.append(result.returncode)
         killed_flags.append(result.killed_by_token)
 
-    assert returncodes == [-9, -9, -9, -9, -9]
+    for returncode in returncodes:
+        _assert_kill_returncode_matches_platform(returncode)
     assert len(killed_flags) == 5
     assert set(killed_flags).issubset({False, True})
