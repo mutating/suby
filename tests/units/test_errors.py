@@ -5,6 +5,7 @@ from suby.subprocess_result import SubprocessResult
 
 
 def test_init_exception_and_raise():
+    """Checks that init exception and raise."""
     result = SubprocessResult()
     with pytest.raises(RunningCommandError) as exc_info:
         raise RunningCommandError('kek', result)
@@ -14,6 +15,7 @@ def test_init_exception_and_raise():
 
 
 def test_wrong_command_error_has_no_result():
+    """Checks that WrongCommandError has no result."""
     error = WrongCommandError('test message')
 
     assert not hasattr(error, 'result')

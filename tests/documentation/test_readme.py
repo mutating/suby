@@ -13,6 +13,7 @@ from suby import RunningCommandError, TimeoutCancellationError, run
 
 
 def test_run_hello_world():
+    """Checks that run hello world."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -29,6 +30,7 @@ def test_run_hello_world():
 
 
 def test_result_repr_format():
+    """Checks that result repr format."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -42,6 +44,7 @@ def test_result_repr_format():
 
 
 def test_path_object_as_argument():
+    """Checks that path object as argument."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -53,6 +56,7 @@ def test_path_object_as_argument():
 
 
 def test_split_false():
+    """Checks that split=False."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -65,6 +69,7 @@ def test_split_false():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_backslashes_preserved_by_default_on_windows():
+    """Checks that backslashes preserved by default on windows."""
     result = run(f'{sys.executable} -c "print(777)"', catch_output=True)
 
     assert result.returncode == 0
@@ -73,12 +78,14 @@ def test_backslashes_preserved_by_default_on_windows():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_double_backslash_can_be_disabled_on_windows():
+    """Checks that double backslash can be disabled on windows."""
     with pytest.raises(RunningCommandError):
         run(f'{sys.executable} -c pass', double_backslash=False)
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
 def test_double_backslash_can_be_enabled_on_non_windows():
+    """Checks that double backslash can be enabled on non windows."""
     result = run(
         sys.executable,
         '-c "import sys; print(sys.argv[1])"',
@@ -92,6 +99,7 @@ def test_double_backslash_can_be_enabled_on_non_windows():
 
 
 def test_stdout_callback_replaces_default_output():
+    """Checks that stdout callback replaces default output."""
     collected = []
 
     def my_new_stdout(string: str):
@@ -110,6 +118,7 @@ def test_stdout_callback_replaces_default_output():
 
 
 def test_catch_output_suppresses_console_output():
+    """Checks that catch output suppresses console output."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -122,6 +131,7 @@ def test_catch_output_suppresses_console_output():
 
 
 def test_logging_on_success():
+    """Checks that logging on success."""
     logger = MemoryLogger()
 
     run('python -c pass', logger=logger, catch_output=True)
@@ -133,6 +143,7 @@ def test_logging_on_success():
 
 
 def test_logging_on_error():
+    """Checks that logging on error."""
     logger = MemoryLogger()
 
     run('python -c "raise ValueError"', logger=logger, catch_exceptions=True, catch_output=True)
@@ -144,6 +155,7 @@ def test_logging_on_error():
 
 
 def test_running_command_error_message_is_printed():
+    """Checks that RunningCommandError message is printed."""
     try:
         run('python -c 1/0', catch_output=True)
     except RunningCommandError as e:
@@ -153,6 +165,7 @@ def test_running_command_error_message_is_printed():
 
 
 def test_catch_exceptions_with_timeout_returns_result():
+    """Checks that catch exceptions with timeout returns result."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert result.stdout == ''
@@ -162,11 +175,13 @@ def test_catch_exceptions_with_timeout_returns_result():
 
 
 def test_timeout_cancellation_error_carries_result():
+    """Checks that TimeoutCancellationError carries result."""
     with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
 
 def test_timeout_cancellation_error_result_fields():
+    """Checks that TimeoutCancellationError result fields."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -179,6 +194,7 @@ def test_timeout_cancellation_error_result_fields():
 
 
 def test_timeout_cancellation_error_result_repr():
+    """Checks that TimeoutCancellationError result repr."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -191,6 +207,7 @@ def test_timeout_cancellation_error_result_repr():
 
 
 def test_condition_token_raises_when_cancelled():
+    """Checks that ConditionToken raises when cancelled."""
     token = ConditionToken(lambda: True)
 
     with pytest.raises(ConditionCancellationError):
@@ -198,6 +215,7 @@ def test_condition_token_raises_when_cancelled():
 
 
 def test_condition_token_with_catch_exceptions_returns_result():
+    """Checks that ConditionToken with catch exceptions returns result."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
@@ -209,6 +227,7 @@ def test_condition_token_with_catch_exceptions_returns_result():
 
 
 def test_condition_token_result_repr():
+    """Checks that ConditionToken result repr."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
@@ -220,11 +239,13 @@ def test_condition_token_result_repr():
 
 
 def test_timeout_raises_timeout_cancellation_error():
+    """Checks that timeout raises TimeoutCancellationError."""
     with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
 
 def test_timeout_error_message():
+    """Checks that timeout error message."""
     try:
         run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
     except TimeoutCancellationError as e:
@@ -234,6 +255,7 @@ def test_timeout_error_message():
 
 
 def test_timeout_with_catch_exceptions_returns_result():
+    """Checks that timeout with catch exceptions returns result."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert result.stdout == ''
@@ -243,6 +265,7 @@ def test_timeout_with_catch_exceptions_returns_result():
 
 
 def test_timeout_result_repr():
+    """Checks that timeout result repr."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert re.fullmatch(

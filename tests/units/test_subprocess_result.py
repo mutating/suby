@@ -4,6 +4,7 @@ from suby.subprocess_result import SubprocessResult
 
 
 def test_generated_id_has_expected_shape_and_is_unique():
+    """Checks that generated id has expected shape and is unique."""
     first_id = SubprocessResult().id
     second_id = SubprocessResult().id
 
@@ -14,6 +15,7 @@ def test_generated_id_has_expected_shape_and_is_unique():
 
 
 def test_default_values():
+    """Checks that default values."""
     assert SubprocessResult().stdout is None
     assert SubprocessResult().stderr is None
     assert SubprocessResult().returncode is None
@@ -21,6 +23,7 @@ def test_default_values():
 
 
 def test_repr_format():
+    """Checks that repr format."""
     result = SubprocessResult()
     result.stdout = 'hello'
     result.stderr = ''

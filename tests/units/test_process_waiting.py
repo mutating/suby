@@ -620,6 +620,7 @@ def test_wait_for_process_exit_without_event_driven_waiter():
 
 
 def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
+    """Checks that coordinator does not lose failure when process exit and failure signals race."""
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -654,6 +655,7 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
 
 
 def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
+    """Checks that coordinator does not lose token error when process exit and failure signals race."""
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -690,6 +692,7 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
 
 
 def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_second(assert_no_suby_thread_leaks):
+    """Checks that coordinator raises recorded callback failure if token error happens second."""
     from threading import current_thread, main_thread  # noqa: PLC0415
 
     callback_failure_saved = Event()
@@ -738,6 +741,7 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
 
 
 def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+    """Checks that stderr callback has no side effect after stdout failure is recorded."""
     failure_recorded = Event()
     late_stderr_callbacks = []
     original_failure_set = _run_module._FailureState.set
@@ -779,6 +783,7 @@ def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(ass
 
 
 def test_result_has_no_late_stderr_line_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+    """Checks that result has no late stderr line after stdout failure is recorded."""
     failure_recorded = Event()
     original_failure_set = _run_module._FailureState.set
 
@@ -817,6 +822,7 @@ def test_result_has_no_late_stderr_line_after_stdout_failure_is_recorded(assert_
 
 
 def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_suby_thread_leaks):
+    """Checks that recorded stdout failure is raised promptly by coordinator."""
     failure_recorded = Event()
     failure_recorded_at = []
     original_failure_set = _run_module._FailureState.set
@@ -852,6 +858,7 @@ def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_sub
 
 
 def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread_leaks):
+    """Checks that failure state writes are locked but reads are not."""
     locklib = pytest.importorskip('locklib')
     traced_locks = []
 
@@ -889,6 +896,7 @@ def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
+    """Checks that timeout thread can win before stdout failure is recorded."""
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
@@ -937,6 +945,7 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
 
 
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it():
+    """Checks that timeout thread can race with recorded token failure before main thread handles it."""
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
@@ -997,6 +1006,7 @@ def test_process_exit_and_last_line_callback_failure_raise_callback_error(
     expected_stderr,
     error_message,
 ):
+    """Checks that process exit and last line callback failure raise callback error."""
     seen: List[str] = []
 
     def callback(text: str):
@@ -1025,6 +1035,7 @@ def test_process_exit_and_last_line_callback_failure_raise_callback_error(
 
 
 def test_process_exit_and_near_exit_token_error_raise_token_error():
+    """Checks that process exit and near-exit token error raise token error."""
     start = time.perf_counter()
 
     def boom_later() -> bool:
@@ -1050,6 +1061,7 @@ def test_process_exit_and_near_exit_token_error_raise_token_error():
 
 
 def test_near_exit_token_error_keeps_kill_result_shape():
+    """Checks that near-exit token error keeps kill result shape."""
     returncodes = []
     killed_flags = []
 
@@ -1080,6 +1092,7 @@ def test_near_exit_token_error_keeps_kill_result_shape():
 
 
 def test_timeout_and_stdout_callback_race_result_shape_is_observable():
+    """Checks that timeout and stdout callback race result shape is observable."""
     returncodes = []
     killed_flags = []
 
