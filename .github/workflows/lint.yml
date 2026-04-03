@@ -19,13 +19,18 @@ jobs:
       with:
           python-version: ${{ matrix.python-version }}
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
     - name: Install dependencies
       shell: bash
-      run: pip install -r requirements_dev.txt
+      run: uv pip install --system -r requirements_dev.txt
 
     - name: Install the library
       shell: bash
-      run: pip install .
+      run: uv pip install --system .
 
     - name: Run ruff
       shell: bash

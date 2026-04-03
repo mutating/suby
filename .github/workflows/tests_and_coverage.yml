@@ -19,22 +19,27 @@ jobs:
       with:
           python-version: ${{ matrix.python-version }}
 
-    - name: Install the library
-      shell: bash
-      run: pip install .
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
 
     - name: Install dependencies
       shell: bash
-      run: pip install -r requirements_dev.txt
+      run: uv pip install --system -r requirements_dev.txt
+
+    - name: Install the library
+      shell: bash
+      run: uv pip install --system .
 
     - name: Print all libs
       shell: bash
-      run: pip list
+      run: uv pip list --system
 
     - name: Run tests and show coverage on the command line
       shell: bash
       run: |
-        pth_file="$(python -c 'import site; print(site.getsitepackages()[0])')/suby_coverage_process_startup.pth"
+        pth_file="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/suby_coverage_process_startup.pth"
         printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
         coverage erase
         COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
@@ -55,7 +60,7 @@ jobs:
     - name: Run tests and show the branch coverage on the command line
       shell: bash
       run: |
-        pth_file="$(python -c 'import site; print(site.getsitepackages()[0])')/suby_coverage_process_startup.pth"
+        pth_file="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/suby_coverage_process_startup.pth"
         printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
         coverage erase
         SUBY_COVERAGE_BRANCH=true COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
