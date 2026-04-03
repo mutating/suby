@@ -638,7 +638,7 @@ def test_double_backslash_can_be_disabled_on_windows():
     # With double_backslash=False, shlex eats the backslashes in the path, making the executable path invalid.
     # r'C:\fake\python.exe' → shlex in posix mode: \f→f, \p→p → 'C:fakepython.exe'
     """Checks that double backslash can be disabled on windows."""
-    with pytest.raises(RunningCommandError, match=match('Error when executing the command "C:fakepython.exe -c pass".')):
+    with pytest.raises(RunningCommandError, match=match('The executable for the command "C:fakepython.exe -c pass" was not found.')):
         run(r'C:\fake\python.exe -c pass', double_backslash=False)
 
 
@@ -683,7 +683,10 @@ def test_missing_command_with_catch_exceptions_returns_filled_result():
 
 def test_missing_command_without_catch_exceptions_attaches_filled_result():
     """Checks that missing command without catch exceptions attaches filled result."""
-    with pytest.raises(RunningCommandError) as exc_info:
+    with pytest.raises(
+        RunningCommandError,
+        match=match('The executable for the command "command_that_definitely_does_not_exist_12345" was not found.'),
+    ) as exc_info:
         run('command_that_definitely_does_not_exist_12345')
 
     assert exc_info.value.result.stdout == ''
@@ -714,7 +717,7 @@ def test_missing_command_with_catch_exceptions_logs_exception():
     assert len(logger.data.error) == 0
     assert len(logger.data.exception) == 1
     assert logger.data.info[0].message == 'The beginning of the execution of the command "command_that_definitely_does_not_exist_12345".'
-    assert logger.data.exception[0].message == 'Error when executing the command "command_that_definitely_does_not_exist_12345".'
+    assert logger.data.exception[0].message == 'The executable for the command "command_that_definitely_does_not_exist_12345" was not found.'
 
 
 def test_missing_command_original_popen_raises_filenotfounderror():
@@ -725,6 +728,149 @@ def test_missing_command_original_popen_raises_filenotfounderror():
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
+@pytest.mark.parametrize(
+    ('startup_error', 'expected_message'),
+    [
+        (
+            FileNotFoundError('missing executable'),
+            'The executable for the command "python -c pass" was not found.',
+        ),
+        (
+            PermissionError('permission denied'),
+            'Permission denied when starting the command "python -c pass".',
+        ),
+        (
+            OSError('generic startup failure'),
+            'OS error when starting the command "python -c pass".',
+        ),
+    ],
+)
+def test_format_startup_failure_message_varies_text_by_startup_error_type(startup_error, expected_message):
+    """Checks that startup failure message text depends on the startup exception type."""
+    message = _run_module.format_startup_failure_message('python -c pass', startup_error)
+
+    assert message == expected_message
+
+
+def test_filenotfounderror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
+    """Checks that FileNotFoundError from Popen is wrapped in our exception with a dedicated startup message."""
+    startup_error = FileNotFoundError('missing executable')
+
+    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
+         pytest.raises(
+             RunningCommandError,
+             match=match('The executable for the command "missing-tool --flag" was not found.'),
+         ) as exc_info:
+        run('missing-tool --flag')
+
+    assert isinstance(exc_info.value, RunningCommandError)
+    assert exc_info.value.__cause__ is startup_error
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr == ''
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
+def test_permissionerror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
+    """Checks that PermissionError from Popen is wrapped in our exception with a dedicated startup message."""
+    startup_error = PermissionError('permission denied')
+
+    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
+         pytest.raises(
+             RunningCommandError,
+             match=match('Permission denied when starting the command "locked-tool --flag".'),
+         ) as exc_info:
+        run('locked-tool --flag')
+
+    assert isinstance(exc_info.value, RunningCommandError)
+    assert exc_info.value.__cause__ is startup_error
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr == ''
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
+def test_generic_oserror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
+    """Checks that generic OSError from Popen is wrapped in our exception with a dedicated startup message."""
+    startup_error = OSError('generic startup failure')
+
+    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
+         pytest.raises(
+             RunningCommandError,
+             match=match('OS error when starting the command "broken-tool --flag".'),
+         ) as exc_info:
+        run('broken-tool --flag')
+
+    assert isinstance(exc_info.value, RunningCommandError)
+    assert exc_info.value.__cause__ is startup_error
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr == ''
+    assert exc_info.value.result.returncode == 1
+    assert exc_info.value.result.killed_by_token is False
+
+
+@pytest.mark.parametrize(
+    ('startup_error', 'command', 'expected_message'),
+    [
+        (
+            FileNotFoundError('missing executable'),
+            'missing-tool --flag',
+            'The executable for the command "missing-tool --flag" was not found.',
+        ),
+        (
+            PermissionError('permission denied'),
+            'locked-tool --flag',
+            'Permission denied when starting the command "locked-tool --flag".',
+        ),
+        (
+            OSError('generic startup failure'),
+            'broken-tool --flag',
+            'OS error when starting the command "broken-tool --flag".',
+        ),
+    ],
+)
+def test_startup_failure_log_message_matches_running_command_error_text(startup_error, command, expected_message):
+    """Checks that catch_exceptions=True logs the same startup message that RunningCommandError would expose."""
+    logger = MemoryLogger()
+
+    with patch.object(_run_module, 'Popen', side_effect=startup_error):
+        result = run(command, catch_exceptions=True, logger=logger)
+
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert result.returncode == 1
+    assert result.killed_by_token is False
+    assert len(logger.data.exception) == 1
+    assert logger.data.exception[0].message == expected_message
+
+    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
+         pytest.raises(RunningCommandError) as exc_info:
+        run(command)
+
+    assert isinstance(exc_info.value, RunningCommandError)
+    assert str(exc_info.value) == logger.data.exception[0].message
+
+
+def test_runtime_failure_after_successful_start_keeps_execution_error_message_and_process_stderr(assert_no_suby_thread_leaks):
+    """Checks that runtime failures keep the execution error message and real process stderr."""
+    logger = MemoryLogger()
+
+    with assert_no_suby_thread_leaks(), \
+         pytest.raises(
+             RunningCommandError,
+             match=match(f'Error when executing the command "{sys.executable} -c "raise ValueError"".'),
+         ) as exc_info:
+        run(sys.executable, '-c "raise ValueError"', logger=logger)
+
+    assert isinstance(exc_info.value, RunningCommandError)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.result.stdout == ''
+    assert 'ValueError' in exc_info.value.result.stderr
+    assert exc_info.value.result.returncode != 0
+    assert len(logger.data.error) == 1
+    assert logger.data.error[0].message == f'Error when executing the command "{sys.executable} -c "raise ValueError"".'
+
+
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
 def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path, assert_no_suby_thread_leaks):
     """Checks that exec format error original popen raises plain OSError."""
@@ -732,11 +878,31 @@ def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path, assert_
     script.write_text('echo hello\n')
     script.chmod(0o755)
 
-    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(
+        RunningCommandError,
+        match=match(f'OS error when starting the command "{script}".'),
+    ) as exc_info:
         run(str(script))
 
     assert type(exc_info.value.__cause__) is OSError
     assert 'Exec format error' in str(exc_info.value.__cause__)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
+def test_exec_format_error_with_catch_exceptions_logs_generic_startup_oserror(tmp_path):
+    """Checks that generic startup OSError uses the dedicated startup message in exception logs."""
+    script = tmp_path / 'script-without-shebang'
+    script.write_text('echo hello\n')
+    script.chmod(0o755)
+    logger = MemoryLogger()
+
+    result = run(str(script), catch_exceptions=True, logger=logger)
+
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert result.returncode == 1
+    assert len(logger.data.exception) == 1
+    assert logger.data.exception[0].message == f'OS error when starting the command "{script}".'
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
@@ -745,13 +911,16 @@ def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
     script = tmp_path / 'script.sh'
     script.write_text('echo hello')
     script.chmod(0o644)
+    logger = MemoryLogger()
 
-    result = run(str(script), catch_exceptions=True)
+    result = run(str(script), catch_exceptions=True, logger=logger)
 
     assert result.stdout == ''
     assert result.stderr == ''
     assert result.returncode == 1
     assert result.killed_by_token is False
+    assert len(logger.data.exception) == 1
+    assert logger.data.exception[0].message == f'Permission denied when starting the command "{script}".'
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
@@ -761,7 +930,10 @@ def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_pa
     script.write_text('echo hello')
     script.chmod(0o644)
 
-    with pytest.raises(RunningCommandError) as exc_info:
+    with pytest.raises(
+        RunningCommandError,
+        match=match(f'Permission denied when starting the command "{script}".'),
+    ) as exc_info:
         run(str(script))
 
     assert exc_info.value.result.stdout == ''
@@ -1048,7 +1220,10 @@ def test_string_like_object_is_rejected():
 
 def test_split_false_does_not_split_single_string_command():
     """Checks that split=False does not split single string command."""
-    with pytest.raises(RunningCommandError):
+    with pytest.raises(
+        RunningCommandError,
+        match=match('The executable for the command ""python -c "print(1)""" was not found.'),
+    ):
         run('python -c "print(1)"', split=False)
 
 
@@ -1156,7 +1331,10 @@ def test_directory_as_executable_is_normalized():
 )
 def test_missing_commands_are_normalized(missing_command, assert_no_suby_thread_leaks):
     """Checks that missing commands are normalized."""
-    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(
+        RunningCommandError,
+        match=match(f'The executable for the command "{missing_command}" was not found.'),
+    ) as exc_info:
         run(missing_command)
 
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)

@@ -120,13 +120,31 @@ def run(  # noqa: PLR0913, PLR0915
             if use_event_driven_timeout:
                 timeout_thread.join()  # pragma: no cover
 
-    except OSError as e:
+    except FileNotFoundError as e:
         fill_startup_failure_result(state.result, e)
+        message = format_startup_failure_message(arguments_string_representation, e)
         if not catch_exceptions:
-            message = f'Error when executing the command "{arguments_string_representation}".'
             logger.exception(message)
             raise RunningCommandError(message, state.result) from e
-        logger.exception(f'Error when executing the command "{arguments_string_representation}".')
+        logger.exception(message)
+        return state.result
+
+    except PermissionError as e:
+        fill_startup_failure_result(state.result, e)
+        message = format_startup_failure_message(arguments_string_representation, e)
+        if not catch_exceptions:
+            logger.exception(message)
+            raise RunningCommandError(message, state.result) from e
+        logger.exception(message)
+        return state.result
+
+    except OSError as e:
+        fill_startup_failure_result(state.result, e)
+        message = format_startup_failure_message(arguments_string_representation, e)
+        if not catch_exceptions:
+            logger.exception(message)
+            raise RunningCommandError(message, state.result) from e
+        logger.exception(message)
         return state.result
 
     fill_result(state, process.returncode)
@@ -262,6 +280,14 @@ def fill_startup_failure_result(result: SubprocessResult, _error: OSError) -> No
     result.stdout = ''
     result.stderr = ''
     result.returncode = 1
+
+
+def format_startup_failure_message(arguments_string_representation: str, error: OSError) -> str:
+    if isinstance(error, FileNotFoundError):
+        return f'The executable for the command "{arguments_string_representation}" was not found.'
+    if isinstance(error, PermissionError):
+        return f'Permission denied when starting the command "{arguments_string_representation}".'
+    return f'OS error when starting the command "{arguments_string_representation}".'
 
 
 def validate_timeout(timeout: Optional[Union[int, float]]) -> None:
