@@ -7,7 +7,7 @@ from typing import Callable, Optional, cast
 
 _event_driven_waiter: Optional[Callable[[int, Optional[float]], None]] = None
 
-if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):
+if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover
     pidfd_open = cast(Callable[[int], int], os.pidfd_open)
 
     def _wait_pidfd(pid: int, timeout_seconds: Optional[float]) -> None:
