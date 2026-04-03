@@ -32,7 +32,7 @@ from suby.subprocess_result import SubprocessResult
 
 _run_module = importlib.import_module('suby.run')
 
-_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH = 32767
+_WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH = 32766
 
 
 def _assert_kill_returncode_matches_platform(returncode: int) -> None:
@@ -2115,19 +2115,25 @@ def test_non_utf8_stderr_is_rejected_consistently():
 
 
 def test_utf8_stdout_accepts_non_ascii_text():
-    """Checks that explicit UTF-8 decoding preserves non-ASCII stdout text."""
-    result = run(sys.executable, '-c', 'print("привет")', split=False, catch_output=True)
+    """Checks that explicit UTF-8 decoding preserves non-ASCII stdout bytes emitted by the child process."""
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; os.write(1, "привет\\n".encode("utf-8"))',
+        split=False,
+        catch_output=True,
+    )
 
     assert result.stdout == 'привет\n'
     assert result.returncode == 0
 
 
 def test_utf8_stderr_accepts_non_ascii_text():
-    """Checks that explicit UTF-8 decoding preserves non-ASCII stderr text."""
+    """Checks that explicit UTF-8 decoding preserves non-ASCII stderr bytes emitted by the child process."""
     result = run(
         sys.executable,
         '-c',
-        'import sys; sys.stderr.write("привет\\n")',
+        'import os; os.write(2, "привет\\n".encode("utf-8"))',
         split=False,
         catch_output=True,
     )
