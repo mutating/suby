@@ -22,7 +22,7 @@ if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):
 
     _event_driven_waiter = _wait_pidfd
 
-elif sys.platform == 'darwin':
+elif sys.platform == 'darwin':  # pragma: no cover (!Darwin)
     if not hasattr(select, 'kqueue'):  # pragma: no cover (Darwin)
         _event_driven_waiter = None
     else:
