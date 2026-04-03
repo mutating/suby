@@ -358,9 +358,10 @@ def test_timeout_kills_long_running_process():
         run(_SLEEP_CMD, timeout=0.5)
 
 
-def test_process_exits_before_timeout():
+def test_process_exits_before_timeout(assert_no_suby_thread_leaks):
     """When process exits before timeout, no exception is raised and output is captured."""
-    result = run(_PRINT_CMD, timeout=10, catch_output=True)
+    with assert_no_suby_thread_leaks():
+        result = run(_PRINT_CMD, timeout=10, catch_output=True)
 
     assert result.stdout == 'hello\n'
     assert result.returncode == 0
@@ -565,7 +566,7 @@ def test_wait_for_process_exit_without_event_driven_waiter():
         process.wait()
 
 
-def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals_race():
+def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -582,7 +583,8 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
         synchronized_release.wait(timeout=1)
         raise RuntimeError('stdout callback exploded in coordinated race')
 
-    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
          pytest.raises(RuntimeError, match='stdout callback exploded in coordinated race') as exc_info:
         run(
             sys.executable,
@@ -598,7 +600,7 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
 
 
-def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_signals_race():
+def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -617,7 +619,8 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
 
     token = ConditionToken(boom_in_race, suppress_exceptions=False)
 
-    with patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module, 'wait_for_process_exit_and_signal', new=controlled_waiter), \
          pytest.raises(RuntimeError, match='token exploded in coordinated race') as exc_info:
         run(
             sys.executable,
@@ -633,7 +636,7 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
     assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
 
 
-def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_second():
+def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_second(assert_no_suby_thread_leaks):
     from threading import current_thread, main_thread  # noqa: PLC0415
 
     callback_failure_saved = Event()
@@ -662,7 +665,8 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
 
     token = ConditionToken(token_boom_after_callback_failure, suppress_exceptions=False)
 
-    with patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
          pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
         run(
             sys.executable,

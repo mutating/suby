@@ -42,8 +42,9 @@ _run_module = importlib.import_module('suby.run')
         (('python -c "print(\'kek\')"',), {'token': SimpleToken()}),
     ],
 )
-def test_normal_way(command, run_kwargs):
-    result = run(*command, **run_kwargs)
+def test_normal_way(command, run_kwargs, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks():
+        result = run(*command, **run_kwargs)
 
     assert result.stdout == 'kek\n'
     assert result.stderr == ''
@@ -57,8 +58,9 @@ def test_normal_way(command, run_kwargs):
         ('python -c "import sys; sys.stderr.write(\'kek\')"',),
     ],
 )
-def test_stderr_catching(command):
-    result = run(*command)
+def test_stderr_catching(command, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks():
+        result = run(*command)
 
     assert result.stdout == ''
     assert result.stderr == 'kek'
@@ -72,8 +74,9 @@ def test_stderr_catching(command):
         ('python -c "raise ValueError"',),
     ],
 )
-def test_catch_exception(command):
-    result = run(*command, catch_exceptions=True)
+def test_catch_exception(command, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks():
+        result = run(*command, catch_exceptions=True)
 
     assert 'ValueError' in result.stderr
     assert result.returncode != 0
@@ -86,13 +89,14 @@ def test_catch_exception(command):
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_timeout(command):
+def test_timeout(command, assert_no_suby_thread_leaks):
     sleep_time = 100000
     timeout = 0.001
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
     start_time = perf_counter()
-    result = run(*command, timeout=timeout, catch_exceptions=True)
+    with assert_no_suby_thread_leaks():
+        result = run(*command, timeout=timeout, catch_exceptions=True)
     end_time = perf_counter()
 
     assert result.returncode != 0
@@ -110,16 +114,16 @@ def test_timeout(command):
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_timeout_without_catching_exception(command):
+def test_timeout_without_catching_exception(command, assert_no_suby_thread_leaks):
     sleep_time = 100000
     timeout = 0.001
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
-    with pytest.raises(TimeoutCancellationError):
+    with assert_no_suby_thread_leaks(), pytest.raises(TimeoutCancellationError):
         run(*command, timeout=timeout)
 
     start_time = perf_counter()
-    with pytest.raises(TimeoutCancellationError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(TimeoutCancellationError) as exc_info:
         run(*command, timeout=timeout)
     end_time = perf_counter()
 
@@ -138,11 +142,11 @@ def test_timeout_without_catching_exception(command):
         (('python -c "raise ValueError"',), 'Error when executing the command "python -c "raise ValueError"".'),
     ],
 )
-def test_exception_in_subprocess_without_catching(command, error_text):
-    with pytest.raises(RunningCommandError, match=re.escape(error_text)):
+def test_exception_in_subprocess_without_catching(command, error_text, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError, match=re.escape(error_text)):
         run(*command)
 
-    with pytest.raises(RunningCommandError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
         run(*command)
 
     assert exc_info.value.result.stdout == ''
@@ -157,11 +161,11 @@ def test_exception_in_subprocess_without_catching(command, error_text):
         ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
     ],
 )
-def test_not_catching_output(command):
+def test_not_catching_output(command, assert_no_suby_thread_leaks):
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
-    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer), assert_no_suby_thread_leaks():
         result = run(*command, catch_output=False)
 
         stderr = stderr_buffer.getvalue()
@@ -179,12 +183,13 @@ def test_not_catching_output(command):
         ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
     ],
 )
-def test_catching_output(command):
+def test_catching_output(command, assert_no_suby_thread_leaks):
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = run(*command, catch_output=True)
+        with assert_no_suby_thread_leaks():
+            result = run(*command, catch_output=True)
 
         assert result.returncode == 0
         assert stderr_buffer.getvalue() == ''
@@ -308,7 +313,7 @@ def test_logging_with_exception_without_catching_exceptions(command, first_log_m
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_only_token(command):
+def test_only_token(command, assert_no_suby_thread_leaks):
     sleep_time = 100000
     timeout = 0.1
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
@@ -316,7 +321,8 @@ def test_only_token(command):
     start_time = perf_counter()
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
-    result = run(*command, catch_exceptions=True, token=token)
+    with assert_no_suby_thread_leaks():
+        result = run(*command, catch_exceptions=True, token=token)
 
     end_time = perf_counter()
 
@@ -336,7 +342,7 @@ def test_only_token(command):
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_only_token_without_catching(command):
+def test_only_token_without_catching(command, assert_no_suby_thread_leaks):
     sleep_time = 100000
     timeout = 0.1
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
@@ -344,7 +350,7 @@ def test_only_token_without_catching(command):
     start_time = perf_counter()
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
-    with pytest.raises(ConditionCancellationError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(ConditionCancellationError) as exc_info:
         run(*command, token=token)
 
     assert exc_info.value.token is token
@@ -375,6 +381,7 @@ def test_token_plus_timeout_without_catching_raises_expected_cancellation(
     run_timeout,
     expected_exception,
     expected_token_identity,
+    assert_no_suby_thread_leaks,
 ):
     sleep_time = 100000
     timeout = 0.1
@@ -383,7 +390,7 @@ def test_token_plus_timeout_without_catching_raises_expected_cancellation(
     start_time = perf_counter()
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
-    with pytest.raises(expected_exception) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(expected_exception) as exc_info:
         run(*command, token=token, timeout=run_timeout)
 
     if expected_token_identity:
@@ -654,12 +661,12 @@ def test_missing_command_original_popen_raises_filenotfounderror():
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
-def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path):
+def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path, assert_no_suby_thread_leaks):
     script = tmp_path / 'script-without-shebang'
     script.write_text('echo hello\n')
     script.chmod(0o755)
 
-    with pytest.raises(RunningCommandError) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
         run(str(script))
 
     assert type(exc_info.value.__cause__) is OSError
@@ -968,6 +975,7 @@ def test_double_backslash_true_changes_non_windows_argument_shape():
     ],
 )
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only startup failure semantics')
+@pytest.mark.usefixtures('assert_no_suby_thread_leaks')
 def test_posix_file_startup_failures_are_normalized_via_running_command_error(
     tmp_path: Path,
     filename,
@@ -997,8 +1005,8 @@ def test_directory_as_executable_is_normalized():
         'definitely_missing_command_for_suby_tests',
     ],
 )
-def test_missing_commands_are_normalized(missing_command):
-    with pytest.raises(RunningCommandError) as exc_info:
+def test_missing_commands_are_normalized(missing_command, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks(), pytest.raises(RunningCommandError) as exc_info:
         run(missing_command)
 
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
@@ -1019,8 +1027,8 @@ def test_missing_commands_are_normalized(missing_command):
         ),
     ],
 )
-def test_callback_exceptions_bubble_up(run_kwargs, command, error_message):
-    with pytest.raises(RuntimeError, match=error_message):
+def test_callback_exceptions_bubble_up(run_kwargs, command, error_message, assert_no_suby_thread_leaks):
+    with assert_no_suby_thread_leaks(), pytest.raises(RuntimeError, match=error_message):
         run(sys.executable, '-c', command, split=False, **run_kwargs)
 
 
@@ -1043,6 +1051,7 @@ def test_callback_exceptions_bubble_up(run_kwargs, command, error_message):
         ),
     ],
 )
+@pytest.mark.usefixtures('assert_no_suby_thread_leaks')
 def test_callback_exceptions_kill_process_and_attach_result(
     run_kwargs,
     command,
@@ -1089,6 +1098,7 @@ def test_callback_exceptions_kill_process_and_attach_result(
         ),
     ],
 )
+@pytest.mark.usefixtures('assert_no_suby_thread_leaks')
 def test_callback_exceptions_after_process_exit_keep_success_returncode(
     callback_kwarg,
     command,
@@ -1113,14 +1123,14 @@ def test_callback_exceptions_after_process_exit_keep_success_returncode(
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
-def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them():
+def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them(assert_no_suby_thread_leaks):
     def stdout_callback(_: str):
         raise RuntimeError('stdout callback exploded')
 
     def stderr_callback(_: str):
         raise RuntimeError('stderr callback exploded')
 
-    with pytest.raises(RuntimeError, match=r'(stdout|stderr) callback exploded') as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(RuntimeError, match=r'(stdout|stderr) callback exploded') as exc_info:
         run(
             sys.executable,
             '-c',
@@ -1202,6 +1212,7 @@ def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kw
         ),
     ],
 )
+@pytest.mark.usefixtures('assert_no_suby_thread_leaks')
 def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_exceptions(
     callback_kwarg,
     command,
@@ -1427,16 +1438,18 @@ def test_catch_output_true_suppresses_failing_callbacks(
     command,
     expected_stdout,
     expected_stderr,
+    assert_no_suby_thread_leaks,
 ):
-    result = run(
-        sys.executable,
-        '-c',
-        command,
-        split=False,
-        catch_output=True,
-        catch_exceptions=True,
-        **run_kwargs,
-    )
+    with assert_no_suby_thread_leaks():
+        result = run(
+            sys.executable,
+            '-c',
+            command,
+            split=False,
+            catch_output=True,
+            catch_exceptions=True,
+            **run_kwargs,
+        )
 
     assert result.stdout == expected_stdout
     assert result.stderr == expected_stderr
@@ -1499,14 +1512,14 @@ def test_condition_token_with_unsuppressed_exception_raises_on_bool_before_run()
         bool(token)
 
 
-def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run():
+def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run(assert_no_suby_thread_leaks):
     def boom() -> bool:
         raise RuntimeError('silent token exploded')
 
     token = ConditionToken(boom, suppress_exceptions=False)
 
     start = time.perf_counter()
-    with pytest.raises(RuntimeError, match='silent token exploded') as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises(RuntimeError, match='silent token exploded') as exc_info:
         run(sys.executable, '-c', 'import time; time.sleep(5)', split=False, token=token)
     elapsed = time.perf_counter() - start
 
@@ -1524,7 +1537,7 @@ def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run():
         True,
     ],
 )
-def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions(delayed_error):
+def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions(delayed_error, assert_no_suby_thread_leaks):
     calls = 0
 
     def token_condition() -> bool:
@@ -1537,7 +1550,7 @@ def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions
     token = ConditionToken(token_condition, suppress_exceptions=False)
 
     start = time.perf_counter()
-    with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
+    with assert_no_suby_thread_leaks(), pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
         run(
             sys.executable,
             '-c',
@@ -1583,19 +1596,21 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
     command,
     expected_non_empty_stream,
     expected_empty_stream,
+    assert_no_suby_thread_leaks,
 ):
     start = time.perf_counter()
     token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
 
-    result = run(
-        sys.executable,
-        '-c',
-        command,
-        split=False,
-        token=token,
-        catch_exceptions=True,
-        catch_output=True,
-    )
+    with assert_no_suby_thread_leaks():
+        result = run(
+            sys.executable,
+            '-c',
+            command,
+            split=False,
+            token=token,
+            catch_exceptions=True,
+            catch_output=True,
+        )
 
     elapsed = time.perf_counter() - start
 
