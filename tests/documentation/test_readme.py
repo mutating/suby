@@ -50,10 +50,13 @@ def test_path_object_as_argument():
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        run(Path(sys.executable), '-c print(777)')
+        result = run(Path(sys.executable), '-c print(777)')
 
     assert stdout_buffer.getvalue() == '777\n'
     assert stderr_buffer.getvalue() == ''
+    assert result.stdout == '777\n'
+    assert result.stderr == ''
+    assert result.returncode == 0
 
 
 def test_split_false():
@@ -100,7 +103,7 @@ def test_double_backslash_can_be_enabled_on_non_windows():
 
 
 def test_stdout_callback_replaces_default_output():
-    """Checks that stdout callback replaces default output."""
+    """A custom stdout callback receives each output line instead of the default console printer."""
     collected = []
 
     def my_new_stdout(string: str):
@@ -210,7 +213,7 @@ def test_timeout_cancellation_error_result_repr():
 
 
 def test_condition_token_raises_when_cancelled():
-    """Checks that ConditionToken raises when cancelled."""
+    """When the cancellation condition is immediately true, run() raises ConditionCancellationError."""
     token = ConditionToken(lambda: True)
 
     with pytest.raises(ConditionCancellationError):
@@ -218,7 +221,7 @@ def test_condition_token_raises_when_cancelled():
 
 
 def test_condition_token_with_catch_exceptions_returns_result():
-    """With catch_exceptions=True, a cancelled ConditionToken returns a killed result instead of raising."""
+    """With catch_exceptions=True, cancellation returns a SubprocessResult with killed_by_token=True instead of raising."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)

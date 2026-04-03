@@ -60,7 +60,7 @@ def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
 def test_event_driven_detects_already_exited_process():
-    """Event-driven wait returns instantly for an already-exited (zombie) process."""
+    """The OS-notification waiter returns immediately for a child process that has already exited but was not waited yet."""
     process = subprocess.Popen([sys.executable, '-c', 'pass'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     process.stdout.close()  # type: ignore[union-attr]
     process.stderr.close()  # type: ignore[union-attr]
@@ -77,7 +77,7 @@ def test_event_driven_detects_already_exited_process():
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
 def test_event_driven_wakes_on_process_exit():
-    """Event-driven wait returns promptly when a process exits during the wait."""
+    """The OS-notification waiter returns promptly when the child process exits during the wait."""
     process = subprocess.Popen(
         [sys.executable, '-c', 'import time; time.sleep(0.1)'],
         stdout=subprocess.PIPE,
@@ -129,7 +129,7 @@ def test_wait_for_process_exit_without_timeout_waits_until_process_finishes():
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven waiter to trigger OSError from')
 def test_oserror_fallback_with_reaped_pid():
-    """When event-driven waiter gets OSError (reaped PID), falls back gracefully without raising."""
+    """If the OS-notification waiter sees OSError for an already-waited PID, wait_for_process_exit falls back cleanly."""
     process = subprocess.Popen(
         [sys.executable, '-c', 'pass'],
         stdout=subprocess.PIPE,
@@ -141,19 +141,19 @@ def test_oserror_fallback_with_reaped_pid():
 
 @pytest.mark.skipif(not _is_macos, reason='macOS only')
 def test_has_event_driven_wait_true_on_macos():
-    """On macOS, event-driven waiting is available via kqueue."""
+    """On macOS, OS-notification waiting is available via kqueue."""
     assert has_event_driven_wait() is True
 
 
 @pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
 def test_has_event_driven_wait_true_on_linux():
-    """On Linux with pidfd_open, event-driven waiting is available."""
+    """On Linux with pidfd_open, OS-notification waiting is available."""
     assert has_event_driven_wait() is True
 
 
 @pytest.mark.skipif(_is_event_driven_platform, reason='Only for fallback platforms')
 def test_has_event_driven_wait_false_on_fallback():
-    """On platforms without pidfd or kqueue, event-driven waiting is unavailable."""
+    """On platforms without pidfd or kqueue, the library falls back to plain process.wait() polling."""
     assert has_event_driven_wait() is False
 
 
@@ -212,7 +212,7 @@ def test_concurrent_calls_thread_safety():
     ],
 )
 def test_platform_waiter_directly_returns_without_killing_running_process(waiter_name):
-    """Direct platform waiter calls return without killing a long-running process."""
+    """Calling the low-level platform waiter directly with a short timeout returns without killing the process."""
     waiter = getattr(process_waiting, waiter_name)
 
     process = subprocess.Popen(
@@ -247,7 +247,7 @@ def test_macos_wait_for_process_exit_passes_none_to_event_driven_waiter():
 
 @pytest.mark.skipif(not _is_macos, reason='macOS only')
 def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
-    """The macOS kqueue waiter builds the expected exit subscription and closes the queue."""
+    """The macOS kqueue waiter subscribes to the child-process exit event and closes the kqueue handle afterwards."""
     mock_kqueue = MagicMock()
     mock_event = object()
 
@@ -284,7 +284,7 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
 def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
-    """The Linux pidfd waiter opens a pidfd, registers it with poll, converts timeout to ms, and closes it."""
+    """The Linux pidfd waiter opens a process fd, waits for readability with poll(), converts timeout to ms, and closes it."""
     poller = MagicMock()
     poll_factory = MagicMock(return_value=poller)
     pidfd_open = MagicMock(return_value=123)
@@ -340,7 +340,7 @@ def test_simulated_linux_pidfd_wait_closes_fd_when_poll_raises():
 
 @pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
 def test_wait_pidfd_direct_without_timeout_waits_until_process_finishes():
-    """Direct pidfd waiting with None timeout blocks until a short-lived process exits."""
+    """Direct pidfd waiting with None timeout blocks until the short-lived child process exits."""
     from suby.process_waiting import _wait_pidfd  # noqa: PLC0415
 
     process = subprocess.Popen(
@@ -395,7 +395,7 @@ def test_timeout_with_catch_exceptions():
 
 
 def test_killed_process_returncode_matches_platform_contract():
-    """Killed processes report -9 on POSIX, but only a non-zero exit code is guaranteed on Windows."""
+    """A process killed by timeout reports SIGKILL as -9 on POSIX, while Windows only guarantees a non-zero exit code."""
     result = run(_SLEEP_CMD, timeout=0.01, catch_exceptions=True)
 
     _assert_kill_returncode_matches_platform(result.returncode)
@@ -403,8 +403,8 @@ def test_killed_process_returncode_matches_platform_contract():
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only pidfd skip policy check')
-def test_linux_pidfd_simulation_tests_are_not_applicable_on_windows():
-    """Windows disables the Linux pidfd/event-driven wait flags, so pidfd simulation tests stay non-applicable there."""
+def test_windows_has_no_event_driven_wait_capability():
+    """On Windows, the OS-notification wait feature flags are all False, so the implementation uses the fallback waiter."""
     assert _is_linux is False
     assert _has_pidfd is False
     assert has_event_driven_wait() is False
@@ -463,8 +463,8 @@ def test_timeout_wait_does_not_kill_already_finished_process():
             process.stderr.close()
 
 
-def test_timeout_only_uses_timeout_thread_according_to_platform():
-    """Timeout-only run() calls run_timeout_thread exactly once on event-driven platforms and never on fallback."""
+def test_run_uses_timeout_thread_only_on_event_driven_platforms():
+    """Timeout-only run() starts run_timeout_thread only when OS-notification waiting is available, not on fallback platforms."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5)
@@ -523,7 +523,7 @@ def test_run_uses_process_waiter_thread(command, run_kwargs, expected_exception,
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='No SIGTERM on Windows')
 def test_process_killed_by_signal_during_wait():
-    """Event-driven wait detects process killed by external signal."""
+    """OS-notification waiting notices when an external SIGTERM kills the child process."""
     process = subprocess.Popen(
         [sys.executable, '-c', 'import time; time.sleep(1000)'],
         stdout=subprocess.PIPE,
@@ -670,7 +670,7 @@ def test_wait_for_process_exit_without_event_driven_waiter():
 
 
 def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
-    """Checks that coordinator does not lose failure when process exit and failure signals race."""
+    """The main coordination loop still raises a recorded callback failure if process-exit and failure notifications race."""
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -705,7 +705,7 @@ def test_coordinator_does_not_lose_failure_when_process_exit_and_failure_signals
 
 
 def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_signals_race(assert_no_suby_thread_leaks):
-    """Checks that coordinator does not lose token error when process exit and failure signals race."""
+    """The main coordination loop still raises a token-condition error if process-exit and failure notifications race."""
     process_exited = Event()
     synchronized_release = Barrier(2)
 
@@ -742,7 +742,7 @@ def test_coordinator_does_not_lose_token_error_when_process_exit_and_failure_sig
 
 
 def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_second(assert_no_suby_thread_leaks):
-    """Checks that coordinator raises recorded callback failure if token error happens second."""
+    """If a callback failure is recorded first, the main coordination loop raises that error even if a token error follows."""
     from threading import current_thread, main_thread  # noqa: PLC0415
 
     callback_failure_saved = Event()
@@ -790,7 +790,7 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
-def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+def test_stderr_callback_not_called_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
     """Once a stdout failure is recorded, later stderr lines should not be delivered to stderr_callback."""
     failure_recorded = Event()
     late_stderr_callbacks = []
@@ -832,8 +832,8 @@ def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(ass
     assert late_stderr_callbacks == []
 
 
-def test_result_has_no_late_stderr_line_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
-    """Checks that result has no late stderr line after stdout failure is recorded."""
+def test_result_excludes_stderr_after_stdout_callback_failure(assert_no_suby_thread_leaks):
+    """After a stdout callback failure is recorded, later stderr emitted by the process is not appended to the result."""
     failure_recorded = Event()
     original_failure_set = _run_module._FailureState.set
 
@@ -872,7 +872,7 @@ def test_result_has_no_late_stderr_line_after_stdout_failure_is_recorded(assert_
 
 
 def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_suby_thread_leaks):
-    """Checks that recorded stdout failure is raised promptly by coordinator."""
+    """Once the stdout failure is stored, the main coordination loop raises it promptly instead of waiting for process exit."""
     failure_recorded = Event()
     failure_recorded_at = []
     original_failure_set = _run_module._FailureState.set
@@ -908,7 +908,7 @@ def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_sub
 
 
 def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread_leaks):
-    """Checks that failure state writes are locked but reads are not."""
+    """The shared failure-state slot serializes writes with a lock, while reads intentionally remain lock-free."""
     locklib = pytest.importorskip('locklib')
     traced_locks = []
 
@@ -946,7 +946,7 @@ def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
-    """Checks that timeout thread can win before stdout failure is recorded.
+    """The timeout helper may finish cancellation before a background stdout callback failure gets stored.
 
     The kill return code assertion is platform-dependent: POSIX reports SIGKILL as -9, while Windows uses a
     different non-zero process exit code.
@@ -999,7 +999,7 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
 
 
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it():
-    """Checks that timeout thread can race with recorded token failure before main thread handles it."""
+    """Timeout cancellation and a just-recorded token-condition failure can overlap before the main loop handles the error."""
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     failure_recorded = Event()
     delay_once = Event()
@@ -1060,7 +1060,7 @@ def test_process_exit_and_last_line_callback_failure_raise_callback_error(
     expected_stderr,
     error_message,
 ):
-    """Checks that process exit and last line callback failure raise callback error."""
+    """If process exit and the callback failure on the final output line happen together, run() raises the callback error."""
     seen: List[str] = []
 
     def callback(text: str):
@@ -1089,7 +1089,7 @@ def test_process_exit_and_last_line_callback_failure_raise_callback_error(
 
 
 def test_process_exit_and_near_exit_token_error_raise_token_error():
-    """Checks that process exit and near-exit token error raise token error."""
+    """If the token condition fails right before process exit, run() raises the token-condition error."""
     start = time.perf_counter()
 
     def boom_later() -> bool:
@@ -1115,7 +1115,7 @@ def test_process_exit_and_near_exit_token_error_raise_token_error():
 
 
 def test_near_exit_token_error_keeps_kill_result_shape():
-    """A near-exit token failure produces a killed-process return code while leaving killed_by_token=False.
+    """A token failure right before process exit still returns the expected result fields and a killed-process return code.
 
     The exact kill return code is asserted only on POSIX, because Windows does not encode SIGKILL as -9.
     """
@@ -1150,7 +1150,7 @@ def test_near_exit_token_error_keeps_kill_result_shape():
 
 
 def test_timeout_and_stdout_callback_race_result_shape_is_observable():
-    """A timeout/stdout-callback race still returns a killed-process return code and a boolean killed flag.
+    """If timeout cancellation and stdout callback failure race, the attached result still has a valid returncode and kill flag.
 
     The return code assertion branches by OS because only POSIX exposes a signal-based -9 exit status here.
     """

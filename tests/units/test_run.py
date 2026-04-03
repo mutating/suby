@@ -147,9 +147,6 @@ def test_timeout_without_catching_exception(command, assert_no_suby_thread_leaks
     timeout = 0.001
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
-    with assert_no_suby_thread_leaks(), pytest.raises(TimeoutCancellationError):
-        run(*command, timeout=timeout)
-
     start_time = perf_counter()
     with assert_no_suby_thread_leaks(), pytest.raises(TimeoutCancellationError) as exc_info:
         run(*command, timeout=timeout)
@@ -327,7 +324,11 @@ def test_logging_with_exception(command, first_log_message, second_log_message):
         (('python -c 1/0',), 'The beginning of the execution of the command "python -c 1/0".', 'Error when executing the command "python -c 1/0".'),
     ],
 )
-def test_logging_with_exception_without_catching_exceptions(command, first_log_message, second_log_message):
+def test_logging_on_runtime_failure_is_consistent_regardless_of_catch_exceptions(
+    command,
+    first_log_message,
+    second_log_message,
+):
     """With catch_exceptions=False, a runtime failure still logs the startup INFO and failure ERROR messages."""
     logger = MemoryLogger()
 
@@ -523,7 +524,7 @@ def test_pass_wrong_positional_argument(arguments, exception_message):
         ('python', '-c', 'print(\'kek\')'),
     ],
 )
-def test_multiple_args_without_split(command):
+def test_split_false_with_multiple_args_executes_successfully(command):
     """With split=False, multiple already-separated command arguments execute successfully."""
     result = run(*command, split=False)
 
@@ -547,7 +548,7 @@ def test_wrong_command(command, exception_message):
 
 
 def test_empty_command_raises_wrong_command_error():
-    """Checks that empty command raises WrongCommandError."""
+    """Calling run() without positional command arguments raises WrongCommandError."""
     with pytest.raises(WrongCommandError, match=match('You must pass at least one positional argument with the command to run.')):
         run()
 
@@ -556,7 +557,7 @@ def test_single_string_is_split_on_all_platforms():
     # Under the old Windows behavior, a single string was NOT split by shlex —
     # it was passed as one token to the subprocess, which would fail.
     # This test verifies that shlex splitting works on all platforms.
-    """Checks that single string is split on all platforms."""
+    """A single command string is split into executable and arguments on every supported platform."""
     result = run('python -c pass')
 
     assert result.returncode == 0
@@ -565,7 +566,7 @@ def test_single_string_is_split_on_all_platforms():
 
 
 def test_envs_for_subprocess_are_same_as_parent():
-    """Checks that environmentironment variables for subprocess are same as parent."""
+    """A child process inherits the parent environment variables."""
     subprocess_env = json.loads(run('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
 
     # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
@@ -590,7 +591,7 @@ def test_executable_path_with_spaces_passed_as_unquoted_string_fails(tmp_path):
     # shlex splits on the space and the command fails.
     # To pass such a path correctly, it must be either quoted in the string
     # or passed as a separate Path object.
-    """Checks that executable path with spaces passed as unquoted string fails."""
+    """An unquoted executable path with spaces is split into multiple tokens and therefore fails to start."""
     space_dir = tmp_path / 'dir with space'
     space_dir.mkdir()
     script = space_dir / 'script.py'
@@ -665,7 +666,7 @@ def test_double_backslash_argument_processing_on_non_windows(run_kwargs, expecte
 
 
 def test_run_returns_subprocess_result():
-    """Checks that run returns SubprocessResult."""
+    """run() returns a SubprocessResult object."""
     result = run('python -c pass')
 
     assert isinstance(result, SubprocessResult)
@@ -730,7 +731,7 @@ def test_missing_command_original_popen_raises_filenotfounderror():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only FileNotFoundError message regression')
 def test_missing_command_name_is_preserved_in_running_command_error_on_windows():
-    """Checks that Windows startup FileNotFoundError keeps the missing command name in our exception message."""
+    """Windows startup FileNotFoundError keeps the missing command name in the re-raised RunningCommandError."""
     missing_command = 'command_that_definitely_does_not_exist_12345'
 
     with pytest.raises(
@@ -747,7 +748,7 @@ def test_missing_command_name_is_preserved_in_running_command_error_on_windows()
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only FileNotFoundError message regression')
 def test_missing_command_name_is_preserved_in_exception_log_on_windows():
-    """Checks that Windows startup FileNotFoundError keeps the missing command name in logger.exception()."""
+    """Windows startup FileNotFoundError keeps the missing command name in logger.exception()."""
     missing_command = 'command_that_definitely_does_not_exist_12345'
     logger = MemoryLogger()
 
@@ -778,14 +779,14 @@ def test_missing_command_name_is_preserved_in_exception_log_on_windows():
     ],
 )
 def test_format_startup_failure_message_varies_text_by_startup_error_type(startup_error, expected_message):
-    """Checks that startup failure message text depends on the startup exception type."""
+    """format_startup_failure_message() returns a different startup message for each OSError subclass."""
     message = _run_module.format_startup_failure_message('python -c pass', startup_error)
 
     assert message == expected_message
 
 
 def test_filenotfounderror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """Checks that FileNotFoundError from Popen is wrapped in our exception with a dedicated startup message."""
+    """FileNotFoundError from process startup is wrapped in RunningCommandError with a not-found message."""
     startup_error = FileNotFoundError('missing executable')
 
     with patch.object(_run_module, 'Popen', side_effect=startup_error), \
@@ -804,7 +805,7 @@ def test_filenotfounderror_from_popen_is_wrapped_in_running_command_error_with_d
 
 
 def test_permissionerror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """Checks that PermissionError from Popen is wrapped in our exception with a dedicated startup message."""
+    """PermissionError from process startup is wrapped in RunningCommandError with a permission-denied message."""
     startup_error = PermissionError('permission denied')
 
     with patch.object(_run_module, 'Popen', side_effect=startup_error), \
@@ -823,7 +824,7 @@ def test_permissionerror_from_popen_is_wrapped_in_running_command_error_with_ded
 
 
 def test_generic_oserror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """Checks that generic OSError from Popen is wrapped in our exception with a dedicated startup message."""
+    """Any other startup OSError is wrapped in RunningCommandError with a generic startup-failure message."""
     startup_error = OSError('generic startup failure')
 
     with patch.object(_run_module, 'Popen', side_effect=startup_error), \
@@ -862,7 +863,7 @@ def test_generic_oserror_from_popen_is_wrapped_in_running_command_error_with_ded
     ],
 )
 def test_startup_failure_log_message_matches_running_command_error_text(startup_error, command, expected_message):
-    """Checks that catch_exceptions=True logs the same startup message that RunningCommandError would expose."""
+    """With catch_exceptions=True, logger.exception() uses the same startup text as RunningCommandError."""
     logger = MemoryLogger()
 
     with patch.object(_run_module, 'Popen', side_effect=startup_error):
@@ -883,8 +884,8 @@ def test_startup_failure_log_message_matches_running_command_error_text(startup_
     assert str(exc_info.value) == logger.data.exception[0].message
 
 
-def test_runtime_failure_after_successful_start_keeps_execution_error_message_and_process_stderr(assert_no_suby_thread_leaks):
-    """Checks that runtime failures keep the execution error message and real process stderr."""
+def test_runtime_failure_has_none_cause_and_keeps_process_stderr(assert_no_suby_thread_leaks):
+    """After a successful process start, runtime failures keep __cause__ unset and preserve real stderr."""
     logger = MemoryLogger()
 
     with assert_no_suby_thread_leaks(), \
@@ -922,7 +923,7 @@ def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path, assert_
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
 def test_exec_format_error_with_catch_exceptions_logs_generic_startup_oserror(tmp_path):
-    """Checks that generic startup OSError uses the dedicated startup message in exception logs."""
+    """A POSIX exec-format startup OSError is logged with the generic startup-failure message."""
     script = tmp_path / 'script-without-shebang'
     script.write_text('echo hello\n')
     script.chmod(0o755)
@@ -977,7 +978,7 @@ def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_pa
 def test_multiple_strings_split_independently():
     # 'python -c' splits to ['python', '-c'], '"print(777)"' splits to ['print(777)']
     # each string is split independently and the results are concatenated
-    """Each string argument is split independently with shlex, and the resulting argv pieces are concatenated."""
+    """Each string argument is split independently, then all subprocess argument pieces are concatenated."""
     result = run('python -c', '"print(777)"', catch_output=True)
 
     assert result.returncode == 0
@@ -986,7 +987,7 @@ def test_multiple_strings_split_independently():
 
 def test_argument_with_space_passed_with_split_false():
     # with split=False the string is passed as-is, spaces are not treated as delimiters
-    """With split=False, a single argument containing spaces is passed as one argv item."""
+    """With split=False, a value containing spaces is passed as a single command-line argument."""
     result = run(
         sys.executable,
         '-c', 'import sys; print(sys.argv[1])',
@@ -1008,12 +1009,12 @@ def test_argument_with_space_passed_with_split_false():
     ],
 )
 def test_errors_are_importable_from_suby(error_name):
-    """Checks that errors are importable from suby."""
+    """The public exception classes are re-exported from the suby package root."""
     assert hasattr(suby, error_name)
 
 
 def test_already_cancelled_simple_token_kills_process():
-    """Checks that already cancelled SimpleToken kills process."""
+    """An already-cancelled token stops the process and returns killed_by_token=True with a non-zero returncode."""
     token = SimpleToken()
     token.cancel()
 
@@ -1033,7 +1034,7 @@ def test_already_cancelled_simple_token_raises():
 
 
 def test_immediately_satisfied_condition_token_kills_process():
-    """Checks that immediately satisfied ConditionToken kills process."""
+    """A token whose condition is already true stops the process and returns a killed result."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
@@ -1099,7 +1100,7 @@ def test_malformed_commands_are_rejected(command):
 
 
 def test_very_long_command_string_is_handled():
-    """Checks that very long command string is handled.
+    """A very long command line still executes when it stays within the platform limit.
 
     Windows has a much lower CreateProcess command line limit than POSIX, so the payload is capped there to the
     longest command line accepted by the platform.
@@ -1140,7 +1141,7 @@ def test_too_long_command_string_is_normalized_on_windows():
 
 
 def test_very_large_output_is_handled_without_a_huge_command_line():
-    """Checks that very large output is captured when the command line itself stays short."""
+    """A very large stdout payload is captured even when the command line itself stays short."""
     payload_size = 100_000
     result = run(sys.executable, '-c', f'print("x" * {payload_size})', split=False, catch_output=True)
 
@@ -1148,7 +1149,7 @@ def test_very_large_output_is_handled_without_a_huge_command_line():
 
 
 def test_very_large_stderr_output_is_handled_without_a_huge_command_line():
-    """Checks that very large stderr output is captured when the command line itself stays short."""
+    """A very large stderr payload is captured even when the command line itself stays short."""
     payload_size = 100_000
     result = run(
         sys.executable,
@@ -1182,7 +1183,7 @@ def test_current_directory_path_object_is_rejected_consistently():
 
 
 def test_path_with_spaces_and_special_characters_executes_via_path_object(tmp_path: Path):
-    """Checks that path with spaces and special characters executes via path object."""
+    """A script path containing spaces and shell-like characters still executes when passed as a Path object."""
     script = tmp_path / 'dir with spaces #and(parens)'
     script.mkdir()
     executable = script / 'echo.py'
@@ -1193,7 +1194,7 @@ def test_path_with_spaces_and_special_characters_executes_via_path_object(tmp_pa
 
 
 def test_run_uses_dedicated_stdout_thread():
-    """Checks that run uses dedicated stdout thread."""
+    """run() starts the dedicated stdout reader thread and still captures stdout."""
     with patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as wrapped:
         result = run(sys.executable, '-c', 'print("ok")', split=False, catch_output=True)
 
@@ -1202,7 +1203,7 @@ def test_run_uses_dedicated_stdout_thread():
 
 
 def test_kill_process_if_running_ignores_process_lookup_error():
-    """Checks that kill process if running ignores process lookup error."""
+    """kill_process_if_running() ignores ProcessLookupError when the process exits between poll() and kill()."""
     class MockProcess:
         def poll(self):
             return None
@@ -1214,7 +1215,7 @@ def test_kill_process_if_running_ignores_process_lookup_error():
 
 
 def test_path_object_that_looks_like_flag_is_treated_as_plain_argument():
-    """Checks that path object that looks like flag is treated as plain argument."""
+    """A Path object such as Path('-c') is treated as a literal subprocess argument, not a string to re-split."""
     result = run(
         Path(sys.executable),
         Path('-c'),
@@ -1241,7 +1242,7 @@ def test_non_string_command_arguments_are_rejected(command):
 
 
 def test_string_like_object_is_rejected():
-    """Checks that string like object is rejected."""
+    """Objects that only implement __str__ are rejected unless they are actual str or Path instances."""
     class StringLikeObject:
         def __str__(self) -> str:
             return 'python'
@@ -1292,15 +1293,15 @@ def test_split_false_with_empty_executable_is_rejected():
 
 
 def test_split_false_with_path_object_still_executes():
-    """Checks that split=False with path object still executes."""
+    """With split=False, a Path executable plus explicit arguments still starts successfully."""
     result = run(Path(sys.executable), '-c', 'print("ok")', split=False, catch_output=True)
 
     assert result.stdout == 'ok\n'
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path semantics')
-def test_unc_path_survives_windows_processing():
-    """With catch_exceptions=True, an unavailable UNC executable returns a startup-failure result with empty streams."""
+def test_unc_path_returns_startup_failure_result_on_windows():
+    """An unavailable UNC network path like \\\\server\\share\\tool.exe returns a startup-failure result on Windows."""
     result = run(r'\\server\share\python.exe -c pass', catch_exceptions=True)
 
     assert isinstance(result, SubprocessResult)
@@ -1312,7 +1313,7 @@ def test_unc_path_survives_windows_processing():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path parsing')
 def test_unc_path_is_passed_to_popen_without_backslash_loss_on_windows():
-    """A UNC executable path should reach Popen as a single argv[0] value with all backslashes preserved."""
+    """A UNC network executable path should reach subprocess startup as one executable argument with backslashes intact."""
     unc_command = r'\\server\share\python.exe -c pass'
     expected_argv = [r'\\server\share\python.exe', '-c', 'pass']
 
@@ -1328,7 +1329,7 @@ def test_unc_path_is_passed_to_popen_without_backslash_loss_on_windows():
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Non-Windows-only behavior')
 def test_double_backslash_true_changes_non_windows_argument_shape():
-    """On non-Windows, double_backslash=True alters the parsed argv shape for a backslash-space argument."""
+    """On non-Windows, double_backslash=True changes how a backslash-space argument is split into subprocess args."""
     result = run(
         sys.executable,
         '-c "import sys; print(sys.argv[1:])"',
@@ -1357,7 +1358,7 @@ def test_posix_file_startup_failures_are_normalized_via_running_command_error(
     mode,
     expected_cause,
 ):
-    """POSIX startup failures for unreadable scripts, missing shebangs, and missing interpreters preserve __cause__."""
+    """POSIX startup failures are converted to RunningCommandError while preserving the original OS error in __cause__."""
     script = tmp_path / filename
     script.write_text(contents)
     script.chmod(mode)
@@ -1369,7 +1370,7 @@ def test_posix_file_startup_failures_are_normalized_via_running_command_error(
 
 
 def test_directory_as_executable_is_normalized():
-    """Trying to execute the current directory is normalized into RunningCommandError."""
+    """Trying to execute the current directory is converted from a raw OS startup error to RunningCommandError."""
     with pytest.raises(RunningCommandError):
         run(str(Path.cwd()))
 
@@ -1407,8 +1408,8 @@ def test_missing_commands_are_normalized(missing_command, assert_no_suby_thread_
         ),
     ],
 )
-def test_callback_exceptions_bubble_up(run_kwargs, command, error_message, assert_no_suby_thread_leaks):
-    """Checks that callback exceptions bubble up."""
+def test_callback_exception_is_raised_by_run(run_kwargs, command, error_message, assert_no_suby_thread_leaks):
+    """An exception raised by a stdout/stderr callback becomes the exception raised by run()."""
     with assert_no_suby_thread_leaks(), pytest.raises(RuntimeError, match=error_message):
         run(sys.executable, '-c', command, split=False, **run_kwargs)
 
@@ -1440,7 +1441,7 @@ def test_callback_exceptions_kill_process_and_attach_result(
     expected_stderr,
     error_message,
 ):
-    """Checks that callback exceptions kill process and attach result."""
+    """A callback failure kills the still-running process and attaches the partial SubprocessResult to the exception."""
     start = time.perf_counter()
     with pytest.raises(RuntimeError, match=error_message) as exc_info:
         run(sys.executable, '-c', command, split=False, **run_kwargs)
@@ -1488,7 +1489,7 @@ def test_callback_exceptions_after_process_exit_keep_success_returncode(
     expected_stderr,
     error_message,
 ):
-    """Checks that callback exceptions after process exit keep success returncode."""
+    """If a callback fails after process exit, the attached result keeps returncode=0 and the collected output."""
     def callback(_: str):
         time.sleep(0.1)
         raise RuntimeError(error_message)
@@ -1506,8 +1507,8 @@ def test_callback_exceptions_after_process_exit_keep_success_returncode(
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
-def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them(assert_no_suby_thread_leaks):
-    """Checks that parallel stdout and stderr callback failures raise one of them."""
+def test_concurrent_stdout_and_stderr_callback_failures_raise_one_exception(assert_no_suby_thread_leaks):
+    """If stdout and stderr callbacks fail concurrently, run() raises one of those callback exceptions."""
     def stdout_callback(_: str):
         raise RuntimeError('stdout callback exploded')
 
@@ -1544,8 +1545,12 @@ def test_parallel_stdout_and_stderr_callback_failures_raise_one_of_them(assert_n
         ),
     ],
 )
-def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kwarg, command, error_message):
-    """A timeout/callback race raises one of the expected exceptions and still reports a killed-process return code.
+def test_timeout_and_callback_error_race_raises_either_exception_with_killed_result(
+    callback_kwarg,
+    command,
+    error_message,
+):
+    """If timeout cancellation and a callback failure race, either exception may win but the result still looks killed.
 
     The kill return code check is strict only on POSIX, because Windows does not use -9 for killed processes.
     """
@@ -1602,14 +1607,14 @@ def test_timeout_and_callback_error_raise_one_of_expected_exceptions(callback_kw
     ],
 )
 @pytest.mark.usefixtures('assert_no_suby_thread_leaks')
-def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_exceptions(
+def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_result(
     callback_kwarg,
     command,
     expected_stdout,
     expected_stderr,
     error_message,
 ):
-    """Near process exit, a timeout/callback race still reports killed_by_token=True and a killed-process return code.
+    """Near process exit, a timeout-versus-callback race still leaves a killed result when timeout cancellation wins.
 
     The return code is validated with a platform-specific branch because POSIX and Windows report killed
     processes differently.
@@ -1655,7 +1660,7 @@ def test_timeout_and_callback_error_after_near_exit_raise_one_of_expected_except
 
 
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten():
-    """Checks that existing result attribute on callback exception is not overwritten."""
+    """If a callback exception already has a result attribute, run() does not overwrite that object."""
     class ResultBearingError(RuntimeError):
         pass
 
@@ -1676,7 +1681,7 @@ def test_existing_result_attribute_on_callback_exception_is_not_overwritten():
 
 
 def test_result_getter_failure_does_not_mask_original_exception():
-    """Checks that result getter failure does not mask original exception."""
+    """If reading exception.result itself fails, run() still raises the original callback exception."""
     class ExplodingResultGetterError(RuntimeError):
         @property
         def result(self) -> SubprocessResult:
@@ -1690,7 +1695,7 @@ def test_result_getter_failure_does_not_mask_original_exception():
 
 
 def test_result_setter_failure_does_not_mask_original_exception():
-    """Checks that result setter failure does not mask original exception."""
+    """If assigning exception.result through a setter fails, run() still raises the original callback exception."""
     class ExplodingResultSetterError(RuntimeError):
         @property
         def result(self):
@@ -1708,7 +1713,7 @@ def test_result_setter_failure_does_not_mask_original_exception():
 
 
 def test_result_assignment_failure_does_not_mask_original_exception():
-    """Checks that result assignment failure does not mask original exception."""
+    """If exception.__setattr__('result', ...) fails, run() still raises the original callback exception."""
     class ExplodingResultAssignmentError(RuntimeError):
         def __setattr__(self, name: str, value: object):
             if name == 'result':
@@ -1785,7 +1790,7 @@ def test_raise_background_failure_ignores_wait_oserror_and_preserves_original_ex
 
 
 def test_slow_stdout_callback_does_not_prevent_completion():
-    """Checks that slow stdout callback does not prevent completion."""
+    """A slow stdout callback may delay line handling, but it does not prevent the command from completing."""
     seen: List[str] = []
 
     def callback(text: str):
@@ -1799,7 +1804,7 @@ def test_slow_stdout_callback_does_not_prevent_completion():
 
 
 def test_callback_that_prints_does_not_deadlock():
-    """Checks that callback that prints does not deadlock."""
+    """A callback that prints to stdout should not deadlock the reader threads."""
     def callback(text: str):
         print(text, end='')  # noqa: T201
 
@@ -1816,7 +1821,7 @@ def test_callback_that_prints_does_not_deadlock():
     ],
 )
 def test_callbacks_must_be_callable(run_kwargs, command):
-    """Checks that callbacks must be callable."""
+    """stdout_callback and stderr_callback must be callable objects."""
     with pytest.raises(TypeError):
         run(sys.executable, '-c', command, split=False, **run_kwargs)  # type: ignore[arg-type]
 
@@ -1838,14 +1843,14 @@ def test_callbacks_must_be_callable(run_kwargs, command):
         ),
     ],
 )
-def test_catch_output_true_suppresses_failing_callbacks(
+def test_catch_output_true_bypasses_callbacks_entirely(
     run_kwargs,
     command,
     expected_stdout,
     expected_stderr,
     assert_no_suby_thread_leaks,
 ):
-    """Checks that catch output=True suppresses failing callbacks."""
+    """With catch_output=True, custom callbacks are bypassed entirely and output is only stored in the result."""
     with assert_no_suby_thread_leaks():
         result = run(
             sys.executable,
@@ -1871,7 +1876,7 @@ def test_catch_output_true_suppresses_failing_callbacks(
     ],
 )
 def test_invalid_timeout_values_are_rejected(timeout, expected_error, error_message):
-    """Checks that invalid timeout values are rejected."""
+    """Negative, NaN, infinite, and non-numeric timeout values are rejected before process execution."""
     with pytest.raises(expected_error, match=error_message):
         run(sys.executable, '-c', 'print("ok")', split=False, timeout=timeout, catch_output=True)  # type: ignore[arg-type]
 
@@ -1884,7 +1889,7 @@ def test_invalid_timeout_values_are_rejected(timeout, expected_error, error_mess
     ],
 )
 def test_non_cancelling_custom_token_is_handled(run_kwargs):
-    """Checks that non cancelling custom token is handled."""
+    """A custom token whose __bool__ never requests cancellation lets the command complete normally."""
     class NeverCancelsToken(AbstractToken):
         def _superpower(self) -> bool:
             return True
@@ -1911,7 +1916,7 @@ def test_non_cancelling_custom_token_is_handled(run_kwargs):
 
 
 def test_condition_token_with_unsuppressed_exception_raises_on_bool_before_run():
-    """Checks that ConditionToken with unsuppressed exception raises on bool before run."""
+    """With suppress_exceptions=False, evaluating bool(token) propagates the token-condition exception."""
     def boom() -> bool:
         raise RuntimeError('token function exploded')
 
@@ -1922,7 +1927,7 @@ def test_condition_token_with_unsuppressed_exception_raises_on_bool_before_run()
 
 
 def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run(assert_no_suby_thread_leaks):
-    """Checks that ConditionToken with unsuppressed exception is not swallowed by run."""
+    """With suppress_exceptions=False, run() propagates the token-condition exception and attaches a result."""
     def boom() -> bool:
         raise RuntimeError('silent token exploded')
 
@@ -2037,15 +2042,19 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
 
 
 def test_tiny_timeout_on_fast_process_is_still_well_formed():
-    """Even an extremely small timeout should raise TimeoutCancellationError with a SubprocessResult attached."""
+    """Even an extremely small timeout returns a fully populated timeout result attached to the exception."""
     with pytest.raises(TimeoutCancellationError) as exc_info:
         run(sys.executable, '-c', 'import time; time.sleep(0.01)', split=False, timeout=0.000001, catch_output=True)
 
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
+    assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
 
 
 def test_stdout_without_newline_is_not_lost():
-    """Checks that stdout without newline is not lost."""
+    """A final stdout chunk without a trailing newline is still preserved in result.stdout."""
     result = run(sys.executable, '-c', 'import sys; sys.stdout.write("hello")', split=False, catch_output=True)
 
     assert result.stdout == 'hello'
@@ -2059,7 +2068,7 @@ def test_stdout_without_newline_is_not_lost():
     ],
 )
 def test_large_output_is_collected_fully(command, expected_stream):
-    """Checks that large output is collected fully."""
+    """Large stdout or stderr streams are collected from the first line through the last line."""
     result = run(
         sys.executable,
         '-c',
@@ -2077,7 +2086,7 @@ def test_large_output_is_collected_fully(command, expected_stream):
 
 
 def test_stderr_heavy_process_does_not_starve_stdout():
-    """Checks that stderr heavy process does not starve stdout."""
+    """Heavy stderr traffic should not starve stdout, meaning stdout is still drained and captured."""
     result = run(
         sys.executable,
         '-c',
@@ -2091,7 +2100,7 @@ def test_stderr_heavy_process_does_not_starve_stdout():
 
 
 def test_interleaved_stdout_and_stderr_are_both_collected():
-    """Checks that interleaved stdout and stderr are both collected."""
+    """Interleaved stdout and stderr output are both collected without losing lines from either stream."""
     result = run(
         sys.executable,
         '-c',
@@ -2113,13 +2122,13 @@ def test_non_utf8_output_is_rejected_or_normalized():
 
 
 def test_non_utf8_stderr_is_rejected_consistently():
-    """Checks that non-UTF-8 stderr bytes are rejected consistently under explicit UTF-8 strict decoding."""
+    """Non-UTF-8 stderr bytes are rejected consistently under explicit UTF-8 strict decoding."""
     with pytest.raises(UnicodeDecodeError):
         run(sys.executable, '-c', 'import os; os.write(2, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
 
 
 def test_utf8_stdout_accepts_non_ascii_text():
-    """Checks that explicit UTF-8 decoding preserves non-ASCII stdout bytes emitted by the child process."""
+    """Explicit UTF-8 decoding preserves non-ASCII stdout bytes emitted by the child process."""
     result = run(
         sys.executable,
         '-c',
@@ -2133,7 +2142,7 @@ def test_utf8_stdout_accepts_non_ascii_text():
 
 
 def test_utf8_stderr_accepts_non_ascii_text():
-    """Checks that explicit UTF-8 decoding preserves non-ASCII stderr bytes emitted by the child process."""
+    """Explicit UTF-8 decoding preserves non-ASCII stderr bytes emitted by the child process."""
     result = run(
         sys.executable,
         '-c',
@@ -2167,7 +2176,7 @@ def test_complex_kwargs_combination_is_well_formed():
 
 
 def test_catch_output_true_suppresses_stdout_callback_even_in_complex_case():
-    """Checks that catch output=True suppresses stdout callback even in complex case."""
+    """With catch_output=True, stdout_callback is bypassed even when no other custom behavior is involved."""
     seen: List[str] = []
     run(
         sys.executable,
@@ -2182,7 +2191,7 @@ def test_catch_output_true_suppresses_stdout_callback_even_in_complex_case():
 
 
 def test_error_paths_return_consistent_subprocess_result_shapes():
-    """Checks that error paths return consistent SubprocessResult shapes."""
+    """Startup failure, runtime failure, and timeout cancellation all return SubprocessResult objects with the same field types."""
     results: List[SubprocessResult] = []
 
     results.append(run('definitely_missing_command_for_suby_shape', catch_exceptions=True))
@@ -2213,7 +2222,7 @@ def test_logging_contract_across_outcomes_is_explicit():
 
 
 def test_parallel_runs_with_shared_callback_do_not_drop_events():
-    """Checks that parallel runs with shared callback do not drop events."""
+    """Concurrent run() calls sharing one callback still deliver one callback event per subprocess."""
     seen: List[str] = []
 
     def worker(index: int):
