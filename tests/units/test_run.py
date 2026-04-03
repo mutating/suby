@@ -565,12 +565,15 @@ def test_single_string_is_split_on_all_platforms():
 def test_envs_for_subprocess_are_same_as_parent():
     """A child process inherits the parent environment variables."""
     subprocess_env = json.loads(run('python -c "import os, json; print(json.dumps(dict(os.environ)))"').stdout)
+    parent_env = dict(environ)
 
     # why: https://stackoverflow.com/questions/1780483/lines-and-columns-environmental-variables-lost-in-a-script
     subprocess_env.pop('LINES', None)
     subprocess_env.pop('COLUMNS', None)
+    parent_env.pop('LINES', None)
+    parent_env.pop('COLUMNS', None)
 
-    assert subprocess_env == environ
+    assert subprocess_env == parent_env
 
 
 def test_executable_path_with_backslashes_passed_as_string():
