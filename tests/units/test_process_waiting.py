@@ -999,7 +999,11 @@ def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
 
 
 def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_handles_it():
-    """Timeout cancellation and a just-stored token-condition exception can overlap before run()'s main coordination loop handles it."""
+    """Timeout cancellation and a just-stored token-condition exception can race before run()'s main coordination loop handles it.
+
+    If the first token poll happens only after the timeout deadline, TimeoutToken can win before the condition callback is
+    ever evaluated. If the condition callback fails first, the main loop raises that recorded RuntimeError.
+    """
     original_raise_failure_if_needed = _run_module.raise_failure_if_needed
     timeout = 0.2
     handling_delay = 0.3
@@ -1019,7 +1023,7 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
     token = ConditionToken(boom, suppress_exceptions=False)
 
     with patch.object(_run_module, 'raise_failure_if_needed', new=delayed_raise_failure_if_needed), \
-         pytest.raises(RuntimeError, match='token exploded before timeout handling') as exc_info:
+         pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
         run(
             sys.executable,
             '-c',
@@ -1029,11 +1033,20 @@ def test_timeout_thread_can_race_with_recorded_token_failure_before_main_thread_
             timeout=timeout,
         )
 
-    assert failure_recorded.is_set()
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
+    result = cast(Any, exc_info.value).result
+
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert isinstance(result.returncode, int)
+
+    if isinstance(exc_info.value, TimeoutCancellationError):
+        assert failure_recorded.is_set() is False
+        _assert_kill_returncode_matches_platform(result.returncode)
+        assert result.killed_by_token is True
+    else:
+        assert str(exc_info.value) == 'token exploded before timeout handling'
+        assert failure_recorded.is_set() is True
 
 
 @pytest.mark.parametrize(
