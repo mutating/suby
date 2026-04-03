@@ -54,6 +54,7 @@ runner="pytest"
 branch = "${SUBY_COVERAGE_BRANCH-false}"
 omit = ["*tests*"]
 parallel = true
+plugins = ["coverage_pyver_pragma"]
 source = ["suby"]
 
 [tool.ruff]
