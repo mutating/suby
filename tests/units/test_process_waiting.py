@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from threading import Barrier, Event, Thread
+from threading import Barrier, Event, Lock, Thread
 from time import monotonic
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -710,6 +710,157 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
     assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
+
+
+def test_stderr_callback_has_no_side_effect_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+    failure_recorded = Event()
+    late_stderr_callbacks = []
+    original_failure_set = _run_module._FailureState.set
+
+    def instrumented_failure_set(self: Any, error: Exception):
+        was_saved = original_failure_set(self, error)
+        if was_saved and str(error) == 'stdout callback exploded first':
+            failure_recorded.set()
+        return was_saved
+
+    def stdout_callback(_: str):
+        raise RuntimeError('stdout callback exploded first')
+
+    def stderr_callback(text: str):
+        if failure_recorded.is_set():
+            late_stderr_callbacks.append(text)
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first'):
+        run(
+            sys.executable,
+            '-c',
+            (
+                'import sys, time\n'
+                'print("stdout-ready", flush=True)\n'
+                'time.sleep(0.2)\n'
+                'sys.stderr.write("late-stderr\\n")\n'
+                'sys.stderr.flush()\n'
+                'time.sleep(5)\n'
+            ),
+            split=False,
+            stdout_callback=stdout_callback,
+            stderr_callback=stderr_callback,
+        )
+
+    assert failure_recorded.is_set()
+    assert late_stderr_callbacks == []
+
+
+def test_result_has_no_late_stderr_line_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+    failure_recorded = Event()
+    original_failure_set = _run_module._FailureState.set
+
+    def instrumented_failure_set(self: Any, error: Exception):
+        was_saved = original_failure_set(self, error)
+        if was_saved and str(error) == 'stdout callback exploded first':
+            failure_recorded.set()
+        return was_saved
+
+    def stdout_callback(_: str):
+        raise RuntimeError('stdout callback exploded first')
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            (
+                'import sys, time\n'
+                'print("stdout-ready", flush=True)\n'
+                'time.sleep(0.2)\n'
+                'sys.stderr.write("late-stderr\\n")\n'
+                'sys.stderr.flush()\n'
+                'time.sleep(5)\n'
+            ),
+            split=False,
+            stdout_callback=stdout_callback,
+            stderr_callback=lambda _: None,
+        )
+
+    assert failure_recorded.is_set()
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'stdout-ready\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
+
+
+def test_recorded_stdout_failure_is_raised_promptly_by_coordinator(assert_no_suby_thread_leaks):
+    failure_recorded = Event()
+    failure_recorded_at = []
+    original_failure_set = _run_module._FailureState.set
+
+    def instrumented_failure_set(self: Any, error: Exception):
+        was_saved = original_failure_set(self, error)
+        if was_saved and str(error) == 'stdout callback exploded first':
+            failure_recorded_at.append(time.perf_counter())
+            failure_recorded.set()
+        return was_saved
+
+    def stdout_callback(_: str):
+        raise RuntimeError('stdout callback exploded first')
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("stdout-ready", flush=True); time.sleep(5)',
+            split=False,
+            stdout_callback=stdout_callback,
+        )
+    handled_after = time.perf_counter()
+
+    assert failure_recorded.is_set()
+    assert len(failure_recorded_at) == 1
+    assert handled_after - failure_recorded_at[0] < 1
+
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'stdout-ready\n'  # type: ignore[attr-defined]
+
+
+def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread_leaks):
+    locklib = pytest.importorskip('locklib')
+    traced_locks = []
+
+    def traced_failure_state_init(self: Any):
+        self._error = None
+        self._lock = locklib.LockTraceWrapper(Lock())
+        traced_locks.append(self._lock)
+
+    def traced_error_getter(self: Any):
+        self._lock.notify('failure_state_error_read')
+        return self._error
+
+    def traced_error_setter(self: Any, error: Exception):
+        self._lock.notify('failure_state_error_write')
+        self._error = error
+
+    def stdout_callback(_: str):
+        raise RuntimeError('stdout callback exploded first')
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, '__init__', new=traced_failure_state_init), \
+         patch.object(_run_module._FailureState, 'error', new=property(traced_error_getter, traced_error_setter), create=True), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first'):
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("stdout-ready", flush=True); time.sleep(5)',
+            split=False,
+            stdout_callback=stdout_callback,
+        )
+
+    assert len(traced_locks) == 1
+    assert traced_locks[0].was_event_locked('failure_state_error_write')
+    assert traced_locks[0].was_event_locked('failure_state_error_read') is False
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
