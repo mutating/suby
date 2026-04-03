@@ -7,7 +7,8 @@ from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
 from threading import Event, Lock, Thread
-from typing import IO, Any, Callable, List, Optional, Tuple, Union, cast
+from types import MappingProxyType
+from typing import IO, Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
 from emptylog import EmptyLogger, LoggerProtocol
@@ -16,6 +17,8 @@ from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import RunningCommandError, WrongCommandError
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
+
+StreamCallback = Callable[[str], Any]  # type: ignore[misc]
 
 
 class _FailureState:
@@ -53,8 +56,8 @@ def run(  # noqa: PLR0913, PLR0915
     catch_output: bool = False,
     catch_exceptions: bool = False,
     logger: LoggerProtocol = EmptyLogger(),  # noqa: B008
-    stdout_callback: Callable[[str], Any] = stdout_with_flush,
-    stderr_callback: Callable[[str], Any] = stderr_with_flush,
+    stdout_callback: StreamCallback = stdout_with_flush,
+    stderr_callback: StreamCallback = stderr_with_flush,
     timeout: Optional[Union[int, float]] = None,
     split: bool = True,
     double_backslash: bool = system() == 'Windows',
@@ -149,7 +152,7 @@ def run(  # noqa: PLR0913, PLR0915
 
     fill_result(state, process.returncode)
 
-    if process.returncode != 0:
+    if state.result.returncode != 0:
         if not catch_exceptions:
             if state.result.killed_by_token:
                 logger.error(f'The execution of the "{arguments_string_representation}" command was canceled using a cancellation token.')
@@ -200,19 +203,19 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     return shlex_split(argument)
 
 
-def run_timeout_thread(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> Thread:  # type: ignore[type-arg]
+def run_timeout_thread(process: Popen[str], timeout: Union[int, float], result: SubprocessResult) -> Thread:
     thread = Thread(target=timeout_wait, args=(process, timeout, result))
     thread.start()
     return thread
 
 
-def run_stdout_thread(process: Popen, catch_output: bool, stdout_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
+def run_stdout_thread(process: Popen[str], catch_output: bool, stdout_callback: StreamCallback, token: AbstractToken, state: _ExecutionState) -> Thread:
     thread = Thread(target=read_stream, args=(process, cast(IO[str], process.stdout), state.stdout_buffer, catch_output, stdout_callback, token, state))
     thread.start()
     return thread
 
 
-def run_stderr_thread(process: Popen, catch_output: bool, stderr_callback: Callable[[str], Any], token: AbstractToken, state: _ExecutionState) -> Thread:  # type: ignore[type-arg]
+def run_stderr_thread(process: Popen[str], catch_output: bool, stderr_callback: StreamCallback, token: AbstractToken, state: _ExecutionState) -> Thread:
     thread = Thread(target=read_stream, args=(process, cast(IO[str], process.stderr), state.stderr_buffer, catch_output, stderr_callback, token, state))
     thread.start()
     return thread
@@ -224,7 +227,7 @@ def run_process_waiter_thread(process: Popen[str], state: _ExecutionState) -> Th
     return thread
 
 
-def timeout_wait(process: Popen, timeout: Union[int, float], result: SubprocessResult) -> None:  # type: ignore[type-arg]
+def timeout_wait(process: Popen[str], timeout: Union[int, float], result: SubprocessResult) -> None:
     wait_for_process_exit(process, timeout)
     if process.poll() is None:
         try:
@@ -240,7 +243,7 @@ def read_stream(  # noqa: PLR0913
     stream: IO[str],
     buffer: List[str],
     catch_output: bool,
-    callback: Callable[[str], Any],
+    callback: StreamCallback,
     token: AbstractToken,
     state: _ExecutionState,
 ) -> None:
@@ -270,10 +273,10 @@ def wait_for_process_exit_and_signal(process: Popen[str], state: _ExecutionState
     state.wake_event.set()
 
 
-def fill_result(state: _ExecutionState, returncode: int) -> None:
+def fill_result(state: _ExecutionState, returncode: Optional[int]) -> None:
     state.result.stdout = ''.join(state.stdout_buffer)
     state.result.stderr = ''.join(state.stderr_buffer)
-    state.result.returncode = returncode
+    state.result.returncode = 1 if returncode is None else returncode
 
 
 def fill_startup_failure_result(result: SubprocessResult, _error: OSError) -> None:
@@ -332,14 +335,14 @@ def kill_process_if_running(process: Popen[str]) -> None:
 
 def attach_result_to_exception(error: BaseException, result: SubprocessResult) -> None:
     try:
-        error_dict = object.__getattribute__(error, '__dict__')
+        error_dict = cast(Dict[str, object], object.__getattribute__(error, '__dict__'))
     except (AttributeError, TypeError):
         error_dict = {}
 
     if 'result' in error_dict:
         return
 
-    if any('result' in cls.__dict__ for cls in type(error).__mro__):
+    if any('result' in cast(MappingProxyType[str, object], cls.__dict__) for cls in type(error).__mro__):
         return
 
     try:

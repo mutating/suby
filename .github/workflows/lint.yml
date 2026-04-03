@@ -37,7 +37,19 @@ jobs:
 
     - name: Run mypy
       shell: bash
-      run: mypy --strict suby
+      run: >-
+        mypy
+        --python-version 3.8
+        --show-error-codes
+        --strict
+        --disallow-any-decorated
+        --disallow-any-explicit
+        --disallow-any-expr
+        --disallow-any-generics
+        --disallow-any-unimported
+        --disallow-subclassing-any
+        --warn-return-any
+        suby
 
     - name: Run mypy for tests
       shell: bash
