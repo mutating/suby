@@ -1538,6 +1538,49 @@ def test_concurrent_stdout_and_stderr_callback_failures_raise_one_exception(asse
     assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
 
 
+def test_second_reader_callback_failure_does_not_replace_first_recorded_failure(assert_no_suby_thread_leaks):
+    """If one reader callback failure is already stored, a later callback failure exits through the non-winning set() branch."""
+    first_failure_recorded = Event()
+    original_failure_set = _run_module._FailureState.set
+
+    def instrumented_failure_set(self, error):
+        was_saved = original_failure_set(self, error)
+        if was_saved and str(error) == 'stdout callback exploded first':
+            first_failure_recorded.set()
+        return was_saved
+
+    def stdout_callback(_: str):
+        raise RuntimeError('stdout callback exploded first')
+
+    def stderr_callback(_: str):
+        if not first_failure_recorded.wait(timeout=1):
+            raise RuntimeError('coordinated second failure setup failed')
+        raise RuntimeError('stderr callback exploded second')
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
+         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            (
+                'import sys, time\n'
+                'print("out", flush=True)\n'
+                'sys.stderr.write("err\\n")\n'
+                'sys.stderr.flush()\n'
+                'time.sleep(5)\n'
+            ),
+            split=False,
+            stdout_callback=stdout_callback,
+            stderr_callback=stderr_callback,
+        )
+
+    assert first_failure_recorded.is_set()
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'out\n'  # type: ignore[attr-defined]
+    assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize(
     ('callback_kwarg', 'command', 'error_message'),
     [
