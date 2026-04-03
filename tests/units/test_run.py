@@ -1581,6 +1581,38 @@ def test_second_reader_callback_failure_does_not_replace_first_recorded_failure(
     assert isinstance(exc_info.value.result.stderr, str)  # type: ignore[attr-defined]
 
 
+def test_read_stream_second_failure_keeps_first_error_and_does_not_set_wake_event():
+    """If callback stores one failure and then raises another, read_stream keeps the first one and skips wake_event.set()."""
+    class FakeProcess:
+        def poll(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    state = _run_module._ExecutionState()
+    first_error = RuntimeError('stdout callback exploded first')
+    buffer = []
+
+    def callback(_: str):
+        assert state.failure_state.set(first_error) is True
+        raise RuntimeError('stderr callback exploded second')
+
+    _run_module.read_stream(
+        FakeProcess(),
+        StringIO('hello\n'),
+        buffer,
+        False,
+        callback,
+        DefaultToken(),
+        state,
+    )
+
+    assert buffer == ['hello\n']
+    assert state.failure_state.error is first_error
+    assert state.wake_event.is_set() is False
+
+
 @pytest.mark.parametrize(
     ('callback_kwarg', 'command', 'error_message'),
     [
