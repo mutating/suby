@@ -1306,6 +1306,22 @@ def test_unc_path_survives_windows_processing():
     assert result.stderr is not None
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path parsing')
+def test_unc_path_is_passed_to_popen_without_backslash_loss_on_windows():
+    """A UNC executable path should reach Popen as a single argv[0] value with all backslashes preserved."""
+    unc_command = r'\\server\share\python.exe -c pass'
+    expected_argv = [r'\\server\share\python.exe', '-c', 'pass']
+
+    with patch.object(_run_module, 'Popen', side_effect=FileNotFoundError('mocked missing UNC executable')) as mock_popen:
+        result = run(unc_command, catch_exceptions=True)
+
+    assert result.stdout == ''
+    assert result.stderr == ''
+    assert result.returncode == 1
+    assert result.killed_by_token is False
+    assert mock_popen.call_args.args[0] == expected_argv
+
+
 @pytest.mark.skipif(sys.platform == 'win32', reason='Non-Windows-only behavior')
 def test_double_backslash_true_changes_non_windows_argument_shape():
     """On non-Windows, double_backslash=True alters the parsed argv shape for a backslash-space argument."""

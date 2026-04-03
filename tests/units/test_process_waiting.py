@@ -555,6 +555,30 @@ def test_rapid_sequential_timeout_calls():
         assert result.returncode == 0
 
 
+def test_rapid_sequential_timeout_calls_do_not_leak_threads(assert_no_suby_thread_leaks):
+    """Rapid sequential timeout-enabled calls should finish without leaving suby worker threads alive."""
+    with assert_no_suby_thread_leaks():
+        for _ in range(10):
+            result = run(_PASS_CMD, timeout=1, catch_output=True)
+
+            assert result.returncode == 0
+
+
+@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux with /proc only')
+def test_rapid_sequential_timeout_calls_do_not_leak_file_descriptors():
+    """On Linux, rapid sequential timeout-enabled run() calls should not grow the process fd table."""
+    fd_count_before = len(list(os.scandir(f'/proc/{os.getpid()}/fd')))
+
+    for _ in range(10):
+        result = run(_PASS_CMD, timeout=1, catch_output=True)
+
+        assert result.returncode == 0
+
+    fd_count_after = len(list(os.scandir(f'/proc/{os.getpid()}/fd')))
+
+    assert fd_count_after <= fd_count_before + 5
+
+
 def test_timeout_zero():
     """Timeout of 0 kills the process immediately."""
     with pytest.raises(TimeoutCancellationError):
