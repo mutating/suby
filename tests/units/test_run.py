@@ -1607,9 +1607,9 @@ def test_timeout_kill_can_be_recorded_before_callback_exception_is_raised(assert
         assert timeout_kill_finished.wait(2)
         raise RuntimeError('stdout callback exploded after timeout kill')
 
-    def tracked_timeout_wait(process, timeout, result):
-        assert callback_entered.wait(2)
-        original_timeout_wait(process, timeout, result)
+    def tracked_timeout_wait(process, _timeout, result):
+        callback_entered.wait(2)
+        original_timeout_wait(process, 0, result)
         timeout_kill_finished.set()
 
     with assert_no_suby_thread_leaks(), \
@@ -1621,7 +1621,7 @@ def test_timeout_kill_can_be_recorded_before_callback_exception_is_raised(assert
             'import time; print("hello", flush=True); time.sleep(5)',
             split=False,
             stdout_callback=delayed_stdout_callback,
-            timeout=0.01,
+            timeout=5,
         )
 
     assert callback_entered.is_set()
