@@ -32,7 +32,15 @@ jobs:
       run: pip list
 
     - name: Run tests and show coverage on the command line
-      run: coverage run --source=suby --omit="*tests*" -m pytest --cache-clear --assert=plain && coverage report -m --fail-under=100
+      shell: bash
+      run: |
+        pth_file="$(python -c 'import site; print(site.getsitepackages()[0])')/suby_coverage_process_startup.pth"
+        printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
+        coverage erase
+        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
+        coverage combine
+        coverage report -m --fail-under=100
+        coverage xml
 
     - name: Upload coverage to Coveralls
       if: runner.os == 'Linux'
@@ -45,4 +53,11 @@ jobs:
       continue-on-error: true
 
     - name: Run tests and show the branch coverage on the command line
-      run: coverage run --branch --source=suby --omit="*tests*" -m pytest --cache-clear --assert=plain && coverage report -m --fail-under=100
+      shell: bash
+      run: |
+        pth_file="$(python -c 'import site; print(site.getsitepackages()[0])')/suby_coverage_process_startup.pth"
+        printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
+        coverage erase
+        SUBY_COVERAGE_BRANCH=true COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
+        coverage combine
+        coverage report -m --fail-under=100

@@ -2009,9 +2009,9 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
     expected_empty_stream,
     assert_no_suby_thread_leaks,
 ):
-    """Checks that token cancellation with active output preserves partial output."""
+    """Token cancellation keeps output produced before cancellation, even with extra subprocess startup overhead."""
     start = time.perf_counter()
-    token = ConditionToken(lambda: time.perf_counter() - start > 0.1)
+    token = ConditionToken(lambda: time.perf_counter() - start > 0.5)
 
     with assert_no_suby_thread_leaks():
         result = run(
@@ -2026,8 +2026,8 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
 
     elapsed = time.perf_counter() - start
 
-    assert elapsed >= 0.1
-    assert elapsed < 2
+    assert elapsed >= 0.5
+    assert elapsed < 4
     assert result.returncode != 0
     assert result.killed_by_token is True
     assert isinstance(getattr(result, expected_non_empty_stream), str)
