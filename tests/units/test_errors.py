@@ -15,7 +15,7 @@ def test_init_exception_and_raise():
 
 
 def test_wrong_command_error_has_no_result():
-    """Checks that WrongCommandError has no result."""
+    """WrongCommandError is raised before any process starts, so it has no attached SubprocessResult."""
     error = WrongCommandError('test message')
 
     assert not hasattr(error, 'result')

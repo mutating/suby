@@ -4,7 +4,7 @@ from suby.subprocess_result import SubprocessResult
 
 
 def test_generated_id_has_expected_shape_and_is_unique():
-    """Checks that generated id has expected shape and is unique."""
+    """Each SubprocessResult gets a unique 32-character lowercase hex identifier without dashes."""
     first_id = SubprocessResult().id
     second_id = SubprocessResult().id
 

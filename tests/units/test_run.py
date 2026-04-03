@@ -8,7 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from os import environ
 from pathlib import Path, PurePath
-from threading import Thread
+from threading import Event, Thread
 from time import perf_counter
 from typing import Any, List, cast
 from unittest.mock import patch
@@ -1296,6 +1296,14 @@ def test_split_false_with_path_object_still_executes():
     assert result.stdout == 'ok\n'
 
 
+def test_double_backslash_does_not_change_path_objects():
+    """double_backslash only rewrites string arguments before shlex splitting, not Path arguments."""
+    arguments = (Path(r'folder\subdir\tool.exe'),)
+
+    assert _run_module.convert_arguments(arguments, split=True, double_backslash=False) == [r'folder\subdir\tool.exe']
+    assert _run_module.convert_arguments(arguments, split=True, double_backslash=True) == [r'folder\subdir\tool.exe']
+
+
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only UNC path semantics')
 def test_unc_path_returns_startup_failure_result_on_windows():
     """An unavailable UNC network path like \\\\server\\share\\tool.exe returns a startup-failure result on Windows."""
@@ -1582,6 +1590,46 @@ def test_timeout_and_callback_error_race_raises_either_exception_with_killed_res
     for returncode in returncodes:
         _assert_kill_returncode_matches_platform(returncode)
     assert killed_flags.issubset({False, True})
+
+
+@pytest.mark.skipif(not _run_module.has_event_driven_wait(), reason='Requires the event-driven timeout helper thread')
+def test_timeout_kill_can_be_recorded_before_callback_exception_is_raised(assert_no_suby_thread_leaks):
+    """A callback exception can be raised while its attached result still says timeout cancellation killed the process."""
+    callback_entered = Event()
+    timeout_kill_finished = Event()
+    original_timeout_wait = _run_module.timeout_wait
+
+    def delayed_stdout_callback(_: str):
+        callback_entered.set()
+        assert timeout_kill_finished.wait(2)
+        raise RuntimeError('stdout callback exploded after timeout kill')
+
+    def tracked_timeout_wait(process, timeout, result):
+        assert callback_entered.wait(2)
+        original_timeout_wait(process, timeout, result)
+        timeout_kill_finished.set()
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module, 'timeout_wait', new=tracked_timeout_wait), \
+         pytest.raises(RuntimeError, match='stdout callback exploded after timeout kill') as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'import time; print("hello", flush=True); time.sleep(5)',
+            split=False,
+            stdout_callback=delayed_stdout_callback,
+            timeout=0.01,
+        )
+
+    assert callback_entered.is_set()
+    assert timeout_kill_finished.is_set()
+    result = cast(Any, exc_info.value).result
+
+    assert isinstance(result, SubprocessResult)
+    assert result.stdout == 'hello\n'
+    assert isinstance(result.stderr, str)
+    _assert_kill_returncode_matches_platform(result.returncode)
+    assert result.killed_by_token is True
 
 
 @pytest.mark.parametrize(
@@ -1950,7 +1998,11 @@ def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run(ass
     ],
 )
 def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions(delayed_error, assert_no_suby_thread_leaks):
-    """For immediate or delayed token failures, a silent process with timeout raises either the token error or timeout."""
+    """A process that produces no output raises either the token error or timeout.
+
+    delayed_error=False means the token condition raises immediately. delayed_error=True means it returns False a
+    few times first, so timeout cancellation can win that race before the token error is observed.
+    """
     calls = 0
 
     def token_condition() -> bool:
@@ -2035,6 +2087,54 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
     assert isinstance(getattr(result, expected_non_empty_stream), str)
     assert getattr(result, expected_non_empty_stream) != ''
     assert '0\n' in getattr(result, expected_non_empty_stream)
+    assert isinstance(getattr(result, expected_empty_stream), str)
+
+
+@pytest.mark.parametrize(
+    ('command', 'expected_non_empty_stream', 'expected_empty_stream'),
+    [
+        (
+            'import sys, time; sys.stdout.write("x" * 100000); sys.stdout.flush(); time.sleep(5)',
+            'stdout',
+            'stderr',
+        ),
+        (
+            'import sys, time; sys.stderr.write("x" * 100000); sys.stderr.flush(); time.sleep(5)',
+            'stderr',
+            'stdout',
+        ),
+    ],
+)
+def test_token_cancellation_during_output_chunk_without_newline_still_kills_process(
+    command,
+    expected_non_empty_stream,
+    expected_empty_stream,
+    assert_no_suby_thread_leaks,
+):
+    """Token cancellation still kills a process while a reader thread is blocked on a large chunk without newlines."""
+    start = time.perf_counter()
+    token = ConditionToken(lambda: time.perf_counter() - start > 0.5)
+
+    with assert_no_suby_thread_leaks():
+        result = run(
+            sys.executable,
+            '-c',
+            command,
+            split=False,
+            token=token,
+            catch_exceptions=True,
+            catch_output=True,
+        )
+
+    elapsed = time.perf_counter() - start
+
+    assert elapsed >= 0.5
+    assert elapsed < 4
+    assert result.returncode != 0
+    assert result.killed_by_token is True
+    assert isinstance(getattr(result, expected_non_empty_stream), str)
+    assert getattr(result, expected_non_empty_stream) != ''
+    assert '\n' not in getattr(result, expected_non_empty_stream)
     assert isinstance(getattr(result, expected_empty_stream), str)
 
 
