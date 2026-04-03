@@ -7,7 +7,7 @@ from typing import Callable, Optional, cast
 
 _event_driven_waiter: Optional[Callable[[int, Optional[float]], None]] = None
 
-if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):
+if sys.platform == 'linux' and hasattr(os, 'pidfd_open'):  # pragma: no cover (!Linux)
     pidfd_open = cast(Callable[[int], int], os.pidfd_open)
 
     def _wait_pidfd(pid: int, timeout_seconds: Optional[float]) -> None:
@@ -50,7 +50,7 @@ def wait_for_process_exit(process: 'Popen[str]', timeout_seconds: Optional[float
     if _event_driven_waiter is not None:
         try:
             _event_driven_waiter(process.pid, timeout_seconds)
-            return  # pragma: no cover (Linux and <py39)
+            return  # pragma: no cover (Windows or (Linux and <py39))
         except OSError:
             pass
     if timeout_seconds is None:
