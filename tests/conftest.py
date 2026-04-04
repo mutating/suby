@@ -20,6 +20,17 @@ def pytest_configure(config):
         os.environ.pop('COVERAGE_PROCESS_START', None)
 
 
+def pytest_ignore_collect(collection_path, config):
+    """Skip typing-snippet tests in mutmut's copied test tree, because mutmut is a runtime mutation runner."""
+    normalized_path = collection_path.as_posix()
+    _ = config
+
+    return (
+        '/tests/typing/' in f'{normalized_path}/'
+        and ('MUTANT_UNDER_TEST' in os.environ or '/mutants/tests/typing/' in f'{normalized_path}/')
+    )
+
+
 @pytest.fixture
 def assert_no_suby_thread_leaks():
     created_threads = []

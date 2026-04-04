@@ -58,6 +58,32 @@ def _load_linux_pidfd_process_waiting(pidfd_open: MagicMock):
 
     return module
 
+
+def _load_process_waiting_for_platform(monkeypatch, platform_value, pidfd_open, kqueue):
+    """Load process_waiting under a synthetic platform/os/select capability matrix."""
+    module_path = Path(process_waiting.__file__)
+    spec = importlib.util.spec_from_file_location('test_process_waiting_platform_probe', module_path)
+
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, 'platform', platform_value)
+
+    if pidfd_open is None:
+        monkeypatch.delattr(os, 'pidfd_open', raising=False)
+    else:
+        monkeypatch.setattr(os, 'pidfd_open', pidfd_open, raising=False)
+
+    if kqueue is None:
+        monkeypatch.delattr(select, 'kqueue', raising=False)
+    else:
+        monkeypatch.setattr(select, 'kqueue', kqueue, raising=False)
+
+    spec.loader.exec_module(module)
+
+    return module
+
 @pytest.mark.skipif(not _is_event_driven_platform, reason='No event-driven wait on this platform')
 def test_event_driven_detects_already_exited_process():
     """The OS-notification waiter returns immediately for a child process that has already exited but was not waited yet."""
@@ -139,22 +165,65 @@ def test_oserror_fallback_with_reaped_pid():
     wait_for_process_exit(process, 0.1)
 
 
-@pytest.mark.skipif(not _is_macos, reason='macOS only')
-def test_has_event_driven_wait_true_on_macos():
-    """On macOS, OS-notification waiting is available via kqueue."""
-    assert has_event_driven_wait() is True
+@pytest.mark.parametrize(
+    'expected',
+    [
+        pytest.param(True, marks=pytest.mark.skipif(not _is_macos, reason='macOS only')),
+        pytest.param(True, marks=pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')),
+        pytest.param(False, marks=pytest.mark.skipif(_is_event_driven_platform, reason='Only for fallback platforms')),
+    ],
+)
+def test_has_event_driven_wait_matches_platform_capabilities(expected):
+    """has_event_driven_wait() reports True on macOS/Linux pidfd platforms and False on fallback platforms."""
+    assert has_event_driven_wait() is expected
 
 
-@pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')
-def test_has_event_driven_wait_true_on_linux():
-    """On Linux with pidfd_open, OS-notification waiting is available."""
-    assert has_event_driven_wait() is True
+@pytest.mark.parametrize(
+    ('platform_value', 'pidfd_open', 'expected_waiter_name'),
+    [
+        (''.join(['li', 'nux']), MagicMock(return_value=123), '_wait_pidfd'),
+        ('aix', MagicMock(return_value=123), None),
+        ('win32', MagicMock(return_value=123), None),
+        ('zzlinux', MagicMock(return_value=123), None),
+        ('linux', None, None),
+    ],
+)
+def test_pidfd_waiter_is_selected_only_for_exact_linux_with_pidfd_support(
+    monkeypatch,
+    platform_value,
+    pidfd_open,
+    expected_waiter_name,
+):
+    """At import time, the pidfd waiter is enabled only for exact linux platform strings with os.pidfd_open available."""
+    module = _load_process_waiting_for_platform(monkeypatch, platform_value, pidfd_open, None)
+
+    if expected_waiter_name is None:
+        assert module._event_driven_waiter is None
+    else:
+        assert module._event_driven_waiter.__name__ == expected_waiter_name
 
 
-@pytest.mark.skipif(_is_event_driven_platform, reason='Only for fallback platforms')
-def test_has_event_driven_wait_false_on_fallback():
-    """On platforms without pidfd or kqueue, the library falls back to plain process.wait() polling."""
-    assert has_event_driven_wait() is False
+@pytest.mark.parametrize(
+    ('platform_value', 'expected_waiter_name'),
+    [
+        (''.join(['dar', 'win']), '_wait_kqueue'),
+        ('aix', None),
+        ('win32', None),
+        ('zzdarwin', None),
+    ],
+)
+def test_kqueue_waiter_is_selected_only_for_exact_darwin_with_kqueue_support(
+    monkeypatch,
+    platform_value,
+    expected_waiter_name,
+):
+    """At import time, the kqueue waiter is enabled only for exact darwin platform strings with select.kqueue available."""
+    module = _load_process_waiting_for_platform(monkeypatch, platform_value, None, MagicMock())
+
+    if expected_waiter_name is None:
+        assert module._event_driven_waiter is None
+    else:
+        assert module._event_driven_waiter.__name__ == expected_waiter_name
 
 
 @pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux with /proc only')
@@ -252,13 +321,15 @@ def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
     mock_event = object()
 
     with patch.object(process_waiting.select, 'kqueue', return_value=mock_kqueue), \
+         patch.object(process_waiting.select, 'KQ_EV_ADD', 0b0011), \
+         patch.object(process_waiting.select, 'KQ_EV_ONESHOT', 0b0101), \
          patch.object(process_waiting.select, 'kevent', return_value=mock_event) as mock_kevent:
         process_waiting._wait_kqueue(12345, 0.5)
 
     mock_kevent.assert_called_once_with(
         12345,
         filter=process_waiting.select.KQ_FILTER_PROC,
-        flags=process_waiting.select.KQ_EV_ADD | process_waiting.select.KQ_EV_ONESHOT,
+        flags=0b0111,
         fflags=process_waiting.select.KQ_NOTE_EXIT,
     )
     mock_kqueue.control.assert_called_once_with([mock_event], 1, 0.5)
@@ -274,8 +345,11 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
         stderr=subprocess.PIPE,
     )
     try:
-        with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
+        with patch.object(process, 'wait', wraps=process.wait) as mock_wait, \
+             patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
             wait_for_process_exit(process, None)
+
+            mock_wait.assert_called_once_with()
 
         assert process.poll() is not None
     finally:
@@ -283,9 +357,22 @@ def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
-def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
-    """The Linux pidfd waiter opens a process fd, waits for readability with poll(), converts timeout to ms, and closes it."""
+@pytest.mark.parametrize(
+    ('timeout', 'expected_poll_timeout', 'poll_side_effect'),
+    [
+        (0.5, 500.0, None),
+        (None, None, None),
+        (0.5, 500.0, OSError('mocked poll failure')),
+    ],
+)
+def test_simulated_linux_pidfd_wait_uses_expected_poll_timeout_and_always_closes_fd(
+    timeout,
+    expected_poll_timeout,
+    poll_side_effect,
+):
+    """The Linux pidfd waiter converts timeout to poll units, passes None unchanged, and always closes the pidfd even if poll() raises."""
     poller = MagicMock()
+    poller.poll.side_effect = poll_side_effect
     poll_factory = MagicMock(return_value=poller)
     pidfd_open = MagicMock(return_value=123)
     close = MagicMock()
@@ -293,48 +380,16 @@ def test_simulated_linux_pidfd_wait_registers_polls_and_closes_fd():
     module = _load_linux_pidfd_process_waiting(pidfd_open)
 
     with patch.object(module.select, 'poll', poll_factory), patch.object(module.os, 'close', close):
-        module._wait_pidfd(456, 0.5)
+        if poll_side_effect is None:
+            module._wait_pidfd(456, timeout)
+        else:
+            with pytest.raises(OSError, match='mocked poll failure'):
+                module._wait_pidfd(456, timeout)
 
     pidfd_open.assert_called_once_with(456)
     poll_factory.assert_called_once_with()
     poller.register.assert_called_once_with(123, select.POLLIN)
-    poller.poll.assert_called_once_with(500.0)
-    close.assert_called_once_with(123)
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
-def test_simulated_linux_pidfd_wait_passes_none_timeout_and_closes_fd():
-    """The Linux pidfd waiter passes None through to poll() and still closes the pidfd."""
-    poller = MagicMock()
-    poll_factory = MagicMock(return_value=poller)
-    pidfd_open = MagicMock(return_value=123)
-    close = MagicMock()
-
-    module = _load_linux_pidfd_process_waiting(pidfd_open)
-
-    with patch.object(module.select, 'poll', poll_factory), patch.object(module.os, 'close', close):
-        module._wait_pidfd(456, None)
-
-    poller.poll.assert_called_once_with(None)
-    close.assert_called_once_with(123)
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='pidfd is Linux-only and select.poll is unavailable on Windows')
-def test_simulated_linux_pidfd_wait_closes_fd_when_poll_raises():
-    """The Linux pidfd waiter closes the pidfd even if poll() raises an OSError."""
-    poller = MagicMock()
-    poller.poll.side_effect = OSError('mocked poll failure')
-    poll_factory = MagicMock(return_value=poller)
-    pidfd_open = MagicMock(return_value=123)
-    close = MagicMock()
-
-    module = _load_linux_pidfd_process_waiting(pidfd_open)
-
-    with patch.object(module.select, 'poll', poll_factory), \
-         patch.object(module.os, 'close', close), \
-         pytest.raises(OSError, match='mocked poll failure'):
-        module._wait_pidfd(456, 0.5)
-
+    poller.poll.assert_called_once_with(expected_poll_timeout)
     close.assert_called_once_with(123)
 
 
@@ -362,10 +417,15 @@ def test_wait_pidfd_direct_without_timeout_waits_until_process_finishes():
             process.kill()
         process.wait()
 
-def test_timeout_kills_long_running_process():
-    """Timeout-only path kills the process and raises TimeoutCancellationError."""
-    with pytest.raises(TimeoutCancellationError):
-        run(_SLEEP_CMD, timeout=0.5)
+@pytest.mark.parametrize('timeout', [0.5, 0.001, 0])
+def test_timeout_kills_long_running_process(timeout):
+    """Timeout-only path kills the process and raises TimeoutCancellationError with a killed result for regular, tiny, and zero-second timeouts."""
+    with pytest.raises(TimeoutCancellationError) as exc_info:
+        run(_SLEEP_CMD, timeout=timeout)
+
+    assert hasattr(exc_info.value, 'result')
+    assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
+    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
 
 
 def test_process_exits_before_timeout(assert_no_suby_thread_leaks):
@@ -376,12 +436,6 @@ def test_process_exits_before_timeout(assert_no_suby_thread_leaks):
     assert result.stdout == 'hello\n'
     assert result.returncode == 0
     assert result.killed_by_token is False
-
-
-def test_very_short_timeout():
-    """Very short timeout still kills the process and raises."""
-    with pytest.raises(TimeoutCancellationError):
-        run(_SLEEP_CMD, timeout=0.001)
 
 
 def test_timeout_with_catch_exceptions():
@@ -476,11 +530,13 @@ def test_run_uses_timeout_thread_only_on_event_driven_platforms():
 
 
 def test_token_plus_timeout_does_not_use_timeout_thread():
-    """When a custom token is passed, timeout thread is not used."""
-    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
+    """When a custom token is passed, run() still starts the process waiter thread but not the dedicated timeout thread."""
+    with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread, \
+         patch.object(_run_module, 'run_process_waiter_thread', wraps=_run_module.run_process_waiter_thread) as mock_waiter_thread:
         with pytest.raises(TimeoutCancellationError):
             run(_SLEEP_CMD, timeout=0.5, token=SimpleToken())
         mock_timeout_thread.assert_not_called()
+        mock_waiter_thread.assert_called_once()
 
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
@@ -547,16 +603,8 @@ def test_process_killed_by_signal_during_wait():
     assert elapsed < 2.0
 
 
-def test_rapid_sequential_timeout_calls():
-    """Rapid sequential timeout-enabled calls should each complete successfully for a short-lived process."""
-    for _ in range(10):
-        result = run(_PASS_CMD, timeout=1, catch_output=True)
-
-        assert result.returncode == 0
-
-
 def test_rapid_sequential_timeout_calls_do_not_leak_threads(assert_no_suby_thread_leaks):
-    """Rapid sequential timeout-enabled calls should finish without leaving suby worker threads alive."""
+    """Rapid sequential timeout-enabled calls should each complete successfully without leaving suby worker threads alive."""
     with assert_no_suby_thread_leaks():
         for _ in range(10):
             result = run(_PASS_CMD, timeout=1, catch_output=True)
@@ -579,40 +627,40 @@ def test_rapid_sequential_timeout_calls_do_not_leak_file_descriptors():
     assert fd_count_after <= fd_count_before + 5
 
 
-def test_timeout_zero():
-    """Timeout of 0 kills the process immediately."""
-    with pytest.raises(TimeoutCancellationError):
-        run(_SLEEP_CMD, timeout=0)
-
-
 def test_race_process_exits_between_poll_and_kill():
-    """When process exits between poll() and kill(), the OSError is caught gracefully."""
+    """When process exits between poll() and kill(), timeout_wait swallows ProcessLookupError and does not mark the result as timeout-killed."""
     from suby.run import timeout_wait  # noqa: PLC0415
 
     class MockProcess:
-        pid = 99999
+        def __init__(self):
+            self.pid = 99999
+            self.kill_called = False
 
         def poll(self):
             return None
 
         def kill(self):
+            self.kill_called = True
             raise ProcessLookupError('No such process')
 
-    result = SubprocessResult()
+    class ResultSpy:
+        def __init__(self):
+            self.killed_by_token = False
+            self.killed_by_token_writes_after_init = 0
+
+        def __setattr__(self, name, value):
+            if name == 'killed_by_token' and 'killed_by_token' in self.__dict__:
+                self.killed_by_token_writes_after_init += 1
+            super().__setattr__(name, value)
+
+    process = MockProcess()
+    result = ResultSpy()
     with patch.object(_run_module, 'wait_for_process_exit'):
-        timeout_wait(MockProcess(), 1.0, result)  # type: ignore[arg-type]
+        timeout_wait(process, 1.0, result)  # type: ignore[arg-type]
 
+    assert process.kill_called is True
+    assert result.killed_by_token_writes_after_init == 0
     assert result.killed_by_token is False
-
-
-def test_timeout_raises_timeout_cancellation_error_with_result():
-    """TimeoutCancellationError carries the result object with correct fields."""
-    with pytest.raises(TimeoutCancellationError) as exc_info:
-        run(_SLEEP_CMD, timeout=0.5)
-
-    assert hasattr(exc_info.value, 'result')
-    assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
-    assert exc_info.value.result.returncode != 0  # type: ignore[attr-defined]
 
 
 @pytest.mark.skipif(not _is_event_driven_platform, reason='Event-driven platforms only')
@@ -625,42 +673,40 @@ def test_oserror_fallback_returns_promptly_on_exit():
     )
     time.sleep(0.5)
 
-    with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
+    with patch.object(process, 'wait', wraps=process.wait) as mock_wait, \
+         patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
         start = monotonic()
         wait_for_process_exit(process, 10.0)
         elapsed = monotonic() - start
+
+        mock_wait.assert_called_once_with(timeout=10.0)
 
     process.wait()
 
     assert elapsed < 2.0
 
 
-def test_oserror_fallback_with_timeout_expiry():
-    """When event-driven waiter raises OSError and process is still running, fallback times out."""
+@pytest.mark.parametrize(
+    'event_driven_waiter',
+    [
+        None,
+        OSError('mocked'),
+    ],
+)
+def test_fallback_wait_times_out_when_process_is_still_running(event_driven_waiter):
+    """When the event-driven waiter is unavailable or raises OSError, fallback process.wait(timeout) leaves a still-running process alive after timeout."""
     process = subprocess.Popen(
         [sys.executable, '-c', 'import time; time.sleep(1000)'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     try:
-        with patch('suby.process_waiting._event_driven_waiter', side_effect=OSError('mocked')):
-            wait_for_process_exit(process, 0.1)
+        if event_driven_waiter is None:
+            patch_kwargs = {'new': None}
+        else:
+            patch_kwargs = {'side_effect': event_driven_waiter}
 
-        assert process.poll() is None
-    finally:
-        process.kill()
-        process.wait()
-
-
-def test_wait_for_process_exit_without_event_driven_waiter():
-    """When _event_driven_waiter is None, falls back to process.wait() directly."""
-    process = subprocess.Popen(
-        [sys.executable, '-c', 'import time; time.sleep(1000)'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        with patch('suby.process_waiting._event_driven_waiter', None):
+        with patch('suby.process_waiting._event_driven_waiter', **patch_kwargs):
             wait_for_process_exit(process, 0.1)
 
         assert process.poll() is None
@@ -790,8 +836,8 @@ def test_coordinator_raises_recorded_callback_failure_if_token_error_happens_sec
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
-def test_stderr_callback_not_called_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
-    """Once a stdout failure is recorded, later stderr lines should not be delivered to stderr_callback."""
+def test_late_stderr_is_not_delivered_or_collected_after_stdout_failure_is_recorded(assert_no_suby_thread_leaks):
+    """Once a stdout failure is recorded, later stderr lines should neither reach stderr_callback nor appear in the attached result."""
     failure_recorded = Event()
     late_stderr_callbacks = []
     original_failure_set = _run_module._FailureState.set
@@ -811,7 +857,7 @@ def test_stderr_callback_not_called_after_stdout_failure_is_recorded(assert_no_s
 
     with assert_no_suby_thread_leaks(), \
          patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
-         pytest.raises(RuntimeError, match='stdout callback exploded first'):
+         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
         run(
             sys.executable,
             '-c',
@@ -830,42 +876,6 @@ def test_stderr_callback_not_called_after_stdout_failure_is_recorded(assert_no_s
 
     assert failure_recorded.is_set()
     assert late_stderr_callbacks == []
-
-
-def test_result_excludes_stderr_after_stdout_callback_failure(assert_no_suby_thread_leaks):
-    """After the stdout reader thread stores a callback failure, stderr written later by the process is not appended."""
-    failure_recorded = Event()
-    original_failure_set = _run_module._FailureState.set
-
-    def instrumented_failure_set(self: Any, error: Exception):
-        was_saved = original_failure_set(self, error)
-        if was_saved and str(error) == 'stdout callback exploded first':
-            failure_recorded.set()
-        return was_saved
-
-    def stdout_callback(_: str):
-        raise RuntimeError('stdout callback exploded first')
-
-    with assert_no_suby_thread_leaks(), \
-         patch.object(_run_module._FailureState, 'set', new=instrumented_failure_set), \
-         pytest.raises(RuntimeError, match='stdout callback exploded first') as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            (
-                'import sys, time\n'
-                'print("stdout-ready", flush=True)\n'
-                'time.sleep(0.2)\n'
-                'sys.stderr.write("late-stderr\\n")\n'
-                'sys.stderr.flush()\n'
-                'time.sleep(5)\n'
-            ),
-            split=False,
-            stdout_callback=stdout_callback,
-            stderr_callback=lambda _: None,
-        )
-
-    assert failure_recorded.is_set()
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == 'stdout-ready\n'  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
@@ -946,7 +956,7 @@ def test_failure_state_writes_are_locked_but_reads_are_not(assert_no_suby_thread
 
 
 def test_timeout_thread_can_win_before_stdout_failure_is_recorded():
-    """The timeout helper may finish cancellation before the stdout reader thread stores its callback exception.
+    """This race can end in either order: timeout wins before the stdout failure is stored, or the stored callback failure is raised.
 
     The kill return code assertion is platform-dependent: POSIX reports SIGKILL as -9, while Windows uses a
     different non-zero process exit code.
@@ -1103,34 +1113,8 @@ def test_process_exit_and_last_line_callback_failure_raise_callback_error(
     assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
 
 
-def test_process_exit_and_near_exit_token_error_raise_token_error():
-    """If the token condition fails right before process exit, run() raises the token-condition error."""
-    start = time.perf_counter()
-
-    def boom_later() -> bool:
-        if time.perf_counter() - start < 0.03:
-            return False
-        raise RuntimeError('token exploded near process exit')
-
-    token = ConditionToken(boom_later, suppress_exceptions=False)
-
-    with pytest.raises(RuntimeError, match='token exploded near process exit') as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; time.sleep(0.05)',
-            split=False,
-            token=token,
-        )
-
-    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
-    assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
-    assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
-    assert isinstance(exc_info.value.result.returncode, int)  # type: ignore[attr-defined]
-
-
 def test_near_exit_token_error_keeps_kill_result_shape():
-    """A token failure right before process exit keeps a coherent result even if process exit wins the final kill race.
+    """A token failure right before process exit raises the token error and keeps a coherent result even if process exit wins the final kill race.
 
     If kill wins and the kill flag is set, the return code is validated with a platform-specific branch because POSIX
     and Windows report killed processes differently. Around process exit, killed_by_token=False can still race with
@@ -1158,8 +1142,13 @@ def test_near_exit_token_error_keeps_kill_result_shape():
                 token=token,
             )
 
-        returncodes.append(exc_info.value.result.returncode)  # type: ignore[attr-defined]
-        killed_flags.append(exc_info.value.result.killed_by_token)  # type: ignore[attr-defined]
+        result = exc_info.value.result  # type: ignore[attr-defined]
+
+        assert isinstance(result, SubprocessResult)
+        assert result.stdout == ''
+        assert result.stderr == ''
+        returncodes.append(result.returncode)
+        killed_flags.append(result.killed_by_token)
 
     for returncode in returncodes:
         assert isinstance(returncode, int)
@@ -1170,38 +1159,3 @@ def test_near_exit_token_error_keeps_kill_result_shape():
             assert returncode >= 0
         else:
             assert returncode in {0, -9}
-    assert killed_flags == [False, False, False, False, False]
-
-
-def test_timeout_and_stdout_callback_race_result_shape_is_observable():
-    """If timeout cancellation and stdout callback failure race, the attached result still has a valid returncode and kill flag.
-
-    The return code assertion branches by OS because only POSIX exposes a signal-based -9 exit status here.
-    """
-    returncodes = []
-    killed_flags = []
-
-    for _ in range(5):
-        def stdout_callback(_: str):
-            raise RuntimeError('stdout callback exploded')
-
-        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-            run(
-                sys.executable,
-                '-c',
-                'import time; print("hello", flush=True); time.sleep(5)',
-                split=False,
-                stdout_callback=stdout_callback,
-                timeout=0.2,
-            )
-
-        result = cast(Any, exc_info.value).result
-
-        assert isinstance(result, SubprocessResult)
-        returncodes.append(result.returncode)
-        killed_flags.append(result.killed_by_token)
-
-    for returncode in returncodes:
-        _assert_kill_returncode_matches_platform(returncode)
-    assert len(killed_flags) == 5
-    assert set(killed_flags).issubset({False, True})

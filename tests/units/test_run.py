@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -55,40 +56,45 @@ def _windows_print_payload_for_command_line_length(target_command_line_length: i
     raise AssertionError('Failed to build a Windows command line payload within the requested length.')
 
 
+def _load_run_module_with_default_system(system_name: str):
+    """Load a fresh suby.run module with platform.system() patched before run() defaults are bound."""
+    module_path = Path(cast(str, _run_module.__file__))
+    module_name = f'test_suby_run_default_system_{system_name.lower()}'
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        with patch('platform.system', return_value=system_name):
+            spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module_name, None)
+
+    return module
+
+
 @pytest.mark.parametrize(
-    ('command', 'run_kwargs'),
+    ('command', 'run_kwargs', 'expected_stdout', 'expected_stderr'),
     [
-        ((Path(sys.executable), '-c "print(\'kek\')"'), {}),
-        ((sys.executable, '-c "print(\'kek\')"'), {}),
-        (('python -c "print(\'kek\')"',), {}),
-        ((sys.executable, '-c "print(\'kek\')"'), {'token': SimpleToken()}),
-        (('python -c "print(\'kek\')"',), {'token': SimpleToken()}),
+        ((Path(sys.executable), '-c "print(\'kek\')"'), {}, 'kek\n', ''),
+        ((sys.executable, '-c "print(\'kek\')"'), {}, 'kek\n', ''),
+        (('python -c "print(\'kek\')"',), {}, 'kek\n', ''),
+        ((sys.executable, '-c "print(\'kek\')"'), {'token': SimpleToken()}, 'kek\n', ''),
+        (('python -c "print(\'kek\')"',), {'token': SimpleToken()}, 'kek\n', ''),
+        ((sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'), {}, '', 'kek'),
+        (('python -c "import sys; sys.stderr.write(\'kek\')"',), {}, '', 'kek'),
     ],
 )
-def test_normal_way(command, run_kwargs, assert_no_suby_thread_leaks):
-    """A regular run() call captures stdout, leaves stderr empty, and returns exit code 0."""
+def test_normal_way(command, run_kwargs, expected_stdout, expected_stderr, assert_no_suby_thread_leaks):
+    """A regular run() call captures stdout/stderr into the result object and returns exit code 0."""
     with assert_no_suby_thread_leaks():
         result = run(*command, **run_kwargs)
 
-    assert result.stdout == 'kek\n'
-    assert result.stderr == ''
-    assert result.returncode == 0
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "import sys; sys.stderr.write(\'kek\')"'),
-        ('python -c "import sys; sys.stderr.write(\'kek\')"',),
-    ],
-)
-def test_stderr_catching(command, assert_no_suby_thread_leaks):
-    """stderr produced by the child process is captured in result.stderr."""
-    with assert_no_suby_thread_leaks():
-        result = run(*command)
-
-    assert result.stdout == ''
-    assert result.stderr == 'kek'
+    assert result.stdout == expected_stdout
+    assert result.stderr == expected_stderr
     assert result.returncode == 0
 
 
@@ -115,46 +121,37 @@ def test_catch_exception(command, assert_no_suby_thread_leaks):
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_timeout(command, assert_no_suby_thread_leaks):
-    """A timeout stops a long-running process after at least the timeout delay and before the full sleep finishes."""
+@pytest.mark.parametrize(
+    ('catch_exceptions', 'expected_exception'),
+    [
+        (True, None),
+        (False, TimeoutCancellationError),
+    ],
+)
+def test_timeout_returns_or_raises_killed_result_according_to_catch_exceptions(
+    command,
+    catch_exceptions,
+    expected_exception,
+    assert_no_suby_thread_leaks,
+):
+    """A timeout kills the process in both modes; catch_exceptions controls whether the result is returned or attached to TimeoutCancellationError."""
     sleep_time = 100000
     timeout = 0.001
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
     start_time = perf_counter()
     with assert_no_suby_thread_leaks():
-        result = run(*command, timeout=timeout, catch_exceptions=True)
+        if expected_exception is None:
+            result = run(*command, timeout=timeout, catch_exceptions=catch_exceptions)
+        else:
+            with pytest.raises(expected_exception) as exc_info:
+                run(*command, timeout=timeout, catch_exceptions=catch_exceptions)
+            result = exc_info.value.result
     end_time = perf_counter()
 
     assert result.returncode != 0
     assert result.stdout == ''
     assert result.stderr == ''
-
-    assert (end_time - start_time) < sleep_time
-    assert (end_time - start_time) >= timeout
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
-        ('python -c "import time; time.sleep({sleep_time})"',),
-    ],
-)
-def test_timeout_without_catching_exception(command, assert_no_suby_thread_leaks):
-    """Without catch_exceptions=True, timeout cancellation raises TimeoutCancellationError with a populated result."""
-    sleep_time = 100000
-    timeout = 0.001
-    command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
-
-    start_time = perf_counter()
-    with assert_no_suby_thread_leaks(), pytest.raises(TimeoutCancellationError) as exc_info:
-        run(*command, timeout=timeout)
-    end_time = perf_counter()
-
-    assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr == ''
-    assert exc_info.value.result.returncode != 0
 
     assert (end_time - start_time) < sleep_time
     assert (end_time - start_time) >= timeout
@@ -184,41 +181,33 @@ def test_exception_in_subprocess_without_catching(command, error_text, assert_no
         ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
     ],
 )
-def test_not_catching_output(command, assert_no_suby_thread_leaks):
-    """With catch_output=False, callbacks forward child stdout/stderr to the current process streams."""
+@pytest.mark.parametrize(
+    ('catch_output', 'expected_console_stdout', 'expected_console_stderr'),
+    [
+        (False, 'kek1', 'kek2'),
+        (True, '', ''),
+    ],
+)
+def test_catch_output_controls_console_forwarding(
+    command,
+    catch_output,
+    expected_console_stdout,
+    expected_console_stderr,
+    assert_no_suby_thread_leaks,
+):
+    """catch_output=False forwards child output to console streams, while catch_output=True suppresses console forwarding."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer), assert_no_suby_thread_leaks():
-        result = run(*command, catch_output=False)
+        result = run(*command, catch_output=catch_output)
 
         stderr = stderr_buffer.getvalue()
         stdout = stdout_buffer.getvalue()
 
         assert result.returncode == 0
-        assert stderr == 'kek2'
-        assert stdout == 'kek1'
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"'),
-        ('python -c "print(\'kek1\', end=\'\'); import sys; sys.stderr.write(\'kek2\')"',),
-    ],
-)
-def test_catching_output(command, assert_no_suby_thread_leaks):
-    """With catch_output=True, child output is suppressed in the console while the command still succeeds."""
-    stderr_buffer = StringIO()
-    stdout_buffer = StringIO()
-
-    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        with assert_no_suby_thread_leaks():
-            result = run(*command, catch_output=True)
-
-        assert result.returncode == 0
-        assert stderr_buffer.getvalue() == ''
-        assert stdout_buffer.getvalue() == ''
+        assert stderr == expected_console_stderr
+        assert stdout == expected_console_stdout
 
 
 @pytest.mark.parametrize(
@@ -300,11 +289,21 @@ def test_logging_with_expired_timeout(command, run_kwargs, expected_exception, f
         (('python -c 1/0',), 'The beginning of the execution of the command "python -c 1/0".', 'Error when executing the command "python -c 1/0".'),
     ],
 )
-def test_logging_with_exception(command, first_log_message, second_log_message):
-    """With catch_exceptions=True, a runtime subprocess failure logs INFO at startup and ERROR at completion."""
+@pytest.mark.parametrize('catch_exceptions', [True, False])
+def test_runtime_failure_logs_startup_info_and_failure_error_in_both_exception_modes(
+    command,
+    first_log_message,
+    second_log_message,
+    catch_exceptions,
+):
+    """Runtime subprocess failure logs the same startup INFO and failure ERROR messages whether exceptions are caught or raised."""
     logger = MemoryLogger()
 
-    run(*command, logger=logger, catch_exceptions=True, catch_output=True)
+    if catch_exceptions:
+        run(*command, logger=logger, catch_exceptions=True, catch_output=True)
+    else:
+        with pytest.raises(RunningCommandError):
+            run(*command, logger=logger, catch_output=True)
 
     assert len(logger.data.info) == 1
     assert len(logger.data.error) == 1
@@ -315,39 +314,26 @@ def test_logging_with_exception(command, first_log_message, second_log_message):
 
 
 @pytest.mark.parametrize(
-    ('command', 'first_log_message', 'second_log_message'),
-    [
-        ((sys.executable, '-c 1/0'), f'The beginning of the execution of the command "{sys.executable} -c 1/0".', f'Error when executing the command "{sys.executable} -c 1/0".'),
-        (('python -c 1/0',), 'The beginning of the execution of the command "python -c 1/0".', 'Error when executing the command "python -c 1/0".'),
-    ],
-)
-def test_logging_on_runtime_failure_is_consistent_regardless_of_catch_exceptions(
-    command,
-    first_log_message,
-    second_log_message,
-):
-    """With catch_exceptions=False, a runtime failure still logs the startup INFO and failure ERROR messages."""
-    logger = MemoryLogger()
-
-    with pytest.raises(RunningCommandError):
-        run(*command, logger=logger, catch_output=True)
-
-    assert len(logger.data.info) == 1
-    assert len(logger.data.error) == 1
-
-    assert logger.data.info[0].message == first_log_message
-    assert logger.data.error[0].message == second_log_message
-
-
-@pytest.mark.parametrize(
     'command',
     [
         (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
         ('python -c "import time; time.sleep({sleep_time})"',),
     ],
 )
-def test_only_token(command, assert_no_suby_thread_leaks):
-    """A ConditionToken cancellation kills the process, marks the result, and happens no earlier than the token delay."""
+@pytest.mark.parametrize(
+    ('catch_exceptions', 'expected_exception'),
+    [
+        (True, None),
+        (False, ConditionCancellationError),
+    ],
+)
+def test_condition_token_cancellation_returns_or_raises_killed_result_according_to_catch_exceptions(
+    command,
+    catch_exceptions,
+    expected_exception,
+    assert_no_suby_thread_leaks,
+):
+    """ConditionToken cancellation kills the process in both modes; catch_exceptions controls whether the result is returned or attached to ConditionCancellationError."""
     sleep_time = 100000
     timeout = 0.1
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
@@ -356,40 +342,13 @@ def test_only_token(command, assert_no_suby_thread_leaks):
     token = ConditionToken(lambda: perf_counter() - start_time > timeout)
 
     with assert_no_suby_thread_leaks():
-        result = run(*command, catch_exceptions=True, token=token)
-
-    end_time = perf_counter()
-
-    assert result.returncode != 0
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.killed_by_token == True
-
-    assert end_time - start_time >= timeout
-    assert end_time - start_time < sleep_time
-
-
-@pytest.mark.parametrize(
-    'command',
-    [
-        (sys.executable, '-c "import time; time.sleep({sleep_time})"'),
-        ('python -c "import time; time.sleep({sleep_time})"',),
-    ],
-)
-def test_only_token_without_catching(command, assert_no_suby_thread_leaks):
-    """Without catch_exceptions=True, ConditionToken cancellation raises ConditionCancellationError and keeps the result."""
-    sleep_time = 100000
-    timeout = 0.1
-    command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
-
-    start_time = perf_counter()
-    token = ConditionToken(lambda: perf_counter() - start_time > timeout)
-
-    with assert_no_suby_thread_leaks(), pytest.raises(ConditionCancellationError) as exc_info:
-        run(*command, token=token)
-
-    assert exc_info.value.token is token
-    result = exc_info.value.result
+        if expected_exception is None:
+            result = run(*command, catch_exceptions=catch_exceptions, token=token)
+        else:
+            with pytest.raises(expected_exception) as exc_info:
+                run(*command, catch_exceptions=catch_exceptions, token=token)
+            assert exc_info.value.token is token
+            result = exc_info.value.result
 
     end_time = perf_counter()
 
@@ -522,7 +481,7 @@ def test_pass_wrong_positional_argument(arguments, exception_message):
     ],
 )
 def test_split_false_with_multiple_args_executes_successfully(command):
-    """With split=False, multiple already-separated command arguments execute successfully."""
+    """With split=False, multiple already-separated command arguments execute successfully, including a Path executable."""
     result = run(*command, split=False)
 
     assert result.stdout == 'kek\n'
@@ -551,10 +510,10 @@ def test_empty_command_raises_wrong_command_error():
 
 
 def test_single_string_is_split_on_all_platforms():
-    # Under the old Windows behavior, a single string was NOT split by shlex —
-    # it was passed as one token to the subprocess, which would fail.
-    # This test verifies that shlex splitting works on all platforms.
-    """A single command string is split into executable and arguments on every supported platform."""
+    """A single command string is split into executable and arguments on every supported platform.
+
+    This guards the old Windows behavior where one command string was passed as a single argv token and failed to start.
+    """
     result = run('python -c pass')
 
     assert result.returncode == 0
@@ -577,21 +536,21 @@ def test_envs_for_subprocess_are_same_as_parent():
 
 
 def test_executable_path_with_backslashes_passed_as_string():
-    # On Windows, sys.executable is a path like C:\Python\python.exe.
-    # shlex with posix=True treats \ as an escape character, silently eating backslashes.
-    # This test verifies that backslashes in paths survive shlex splitting.
-    """Backslashes in a string executable path survive command parsing and the command starts successfully."""
+    """Backslashes in a string executable path survive command parsing and the command starts successfully.
+
+    This matters on Windows because sys.executable is usually a path like C:\\Python\\python.exe, and shlex with
+    posix=True would otherwise treat backslashes as escapes.
+    """
     result = run(sys.executable, '-c pass')
 
     assert result.returncode == 0
 
 
 def test_executable_path_with_spaces_passed_as_unquoted_string_fails(tmp_path):
-    # When a path containing spaces is embedded in a command string without quotes,
-    # shlex splits on the space and the command fails.
-    # To pass such a path correctly, it must be either quoted in the string
-    # or passed as a separate Path object.
-    """An unquoted executable path with spaces is split into multiple tokens and therefore fails to start."""
+    """An unquoted executable path with spaces is split into multiple tokens and therefore fails to start.
+
+    The supported alternatives are quoting that path in a single command string or passing it as a separate Path object.
+    """
     space_dir = tmp_path / 'dir with space'
     space_dir.mkdir()
     script = space_dir / 'script.py'
@@ -604,12 +563,11 @@ def test_executable_path_with_spaces_passed_as_unquoted_string_fails(tmp_path):
 
 
 def test_argument_with_trailing_backslash(tmp_path):
-    # On Windows, subprocess uses list2cmdline to convert the arg list back into a
-    # command string for CreateProcess. list2cmdline wraps args that contain spaces in
-    # double quotes. If such an arg ends in \, the result is "arg\" — the \" is
-    # interpreted by the Windows parser as an escaped quote, not a closing quote,
-    # which mangles the argument and everything that follows.
-    """With split=False, an argument ending in a trailing backslash is passed to the subprocess unchanged."""
+    """With split=False, an argument ending in a trailing backslash is passed to the subprocess unchanged.
+
+    This covers the Windows list2cmdline edge case where a quoted argument ending in \\ can otherwise be parsed as an
+    escaped closing quote and mangle the argv tail.
+    """
     dir_with_trailing_backslash = str(tmp_path) + '\\'  # tmp_path on Windows has spaces
 
     result = run(
@@ -625,9 +583,7 @@ def test_argument_with_trailing_backslash(tmp_path):
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_double_backslash_enabled_by_default_on_windows():
-    # sys.executable on Windows is a path like C:\Python\python.exe.
-    # With double_backslash=True (the default on Windows), backslashes survive shlex splitting.
-    """On Windows, the default double_backslash=True preserves backslashes and lets sys.executable run."""
+    """On Windows, the default double_backslash=True preserves backslashes and lets a sys.executable command string run."""
     result = run(f'{sys.executable} -c "print(\'kek\')"', catch_output=True)
 
     assert result.returncode == 0
@@ -636,11 +592,33 @@ def test_double_backslash_enabled_by_default_on_windows():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only test')
 def test_double_backslash_can_be_disabled_on_windows():
-    # With double_backslash=False, shlex eats the backslashes in the path, making the executable path invalid.
-    # r'C:\fake\python.exe' → shlex in posix mode: \f→f, \p→p → 'C:fakepython.exe'
     """On Windows, double_backslash=False lets shlex consume backslashes and turns the executable path invalid."""
+    # r'C:\fake\python.exe' becomes 'C:fakepython.exe' because shlex in POSIX mode treats \f and \p as escapes.
     with pytest.raises(RunningCommandError, match=match('The executable for the command "C:fakepython.exe -c pass" was not found.')):
         run(r'C:\fake\python.exe -c pass', double_backslash=False)
+
+
+@pytest.mark.parametrize(
+    ('system_name', 'expected_double_backslash'),
+    [
+        (''.join(['Win', 'dows']), True),
+        ('Linux', False),
+        ('Zindows', False),
+    ],
+)
+def test_default_double_backslash_is_bound_from_exact_platform_system_name(
+    system_name,
+    expected_double_backslash,
+):
+    """The default double_backslash value reaches convert_arguments() from an exact platform.system() == 'Windows' check at import time."""
+    module = _load_run_module_with_default_system(system_name)
+
+    with patch.object(module, 'convert_arguments', wraps=module.convert_arguments) as mock_convert_arguments, \
+         patch.object(module, 'Popen', side_effect=FileNotFoundError('mocked missing command')):
+        module.run('python -c pass', catch_exceptions=True)
+
+    mock_convert_arguments.assert_called_once()
+    assert mock_convert_arguments.call_args.args == (('python -c pass',), True, expected_double_backslash)
 
 
 @pytest.mark.parametrize(
@@ -652,7 +630,7 @@ def test_double_backslash_can_be_disabled_on_windows():
 )
 @pytest.mark.skipif(sys.platform == 'win32', reason='non-Windows test')
 def test_double_backslash_argument_processing_on_non_windows(run_kwargs, expected_output):
-    """On non-Windows, double_backslash=True changes how a backslash-space argument is parsed."""
+    """On non-Windows, default double_backslash=False merges backslash-space into one space, while double_backslash=True preserves the backslash."""
     result = run(
         sys.executable,
         '-c "import sys; print(sys.argv[1])"',
@@ -672,8 +650,26 @@ def test_run_returns_subprocess_result():
     assert isinstance(result, SubprocessResult)
 
 
+def test_run_starts_popen_with_line_buffered_utf8_text_pipes(assert_no_suby_thread_leaks):
+    """run() starts Popen with line-buffered UTF-8 text pipes for both stdout and stderr."""
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module, 'Popen', wraps=_run_module.Popen) as mock_popen:
+        result = run(sys.executable, '-c', 'pass', split=False, catch_output=True)
+
+    mock_popen.assert_called_once_with(
+        [sys.executable, '-c', 'pass'],
+        stdout=_run_module.PIPE,
+        stderr=_run_module.PIPE,
+        bufsize=1,
+        text=True,
+        encoding='utf-8',
+        errors='strict',
+    )
+    assert result.returncode == 0
+
+
 def test_missing_command_with_catch_exceptions_returns_filled_result():
-    """A missing executable with catch_exceptions=True returns an empty-output result with returncode=1."""
+    """A missing executable with catch_exceptions=True returns an empty-output result with empty stderr and returncode=1."""
     result = run('command_that_definitely_does_not_exist_12345', catch_exceptions=True)
 
     assert result.stdout == ''
@@ -683,28 +679,18 @@ def test_missing_command_with_catch_exceptions_returns_filled_result():
 
 
 def test_missing_command_without_catch_exceptions_attaches_filled_result():
-    """A missing executable raises RunningCommandError with an empty-output result and returncode=1."""
+    """A missing executable raises RunningCommandError with an empty-output result, returncode=1, and FileNotFoundError as __cause__."""
     with pytest.raises(
         RunningCommandError,
         match=match('The executable for the command "command_that_definitely_does_not_exist_12345" was not found.'),
     ) as exc_info:
         run('command_that_definitely_does_not_exist_12345')
 
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
     assert exc_info.value.result.stdout == ''
     assert exc_info.value.result.stderr == ''
     assert exc_info.value.result.returncode == 1
     assert exc_info.value.result.killed_by_token is False
-
-
-def test_missing_command_stderr_shape_matches_current_platform():
-    """Startup FileNotFoundError is not process stderr, so stderr stays empty on every platform."""
-    missing_command = 'command_that_definitely_does_not_exist_12345'
-    result = run(missing_command, catch_exceptions=True)
-
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.returncode == 1
-    assert result.killed_by_token is False
 
 
 def test_missing_command_with_catch_exceptions_logs_exception():
@@ -719,14 +705,6 @@ def test_missing_command_with_catch_exceptions_logs_exception():
     assert len(logger.data.exception) == 1
     assert logger.data.info[0].message == 'The beginning of the execution of the command "command_that_definitely_does_not_exist_12345".'
     assert logger.data.exception[0].message == 'The executable for the command "command_that_definitely_does_not_exist_12345" was not found.'
-
-
-def test_missing_command_original_popen_raises_filenotfounderror():
-    """A missing executable is exposed as RunningCommandError whose __cause__ is FileNotFoundError."""
-    with pytest.raises(RunningCommandError) as exc_info:
-        run('command_that_definitely_does_not_exist_12345')
-
-    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows-only FileNotFoundError message regression')
@@ -785,54 +763,38 @@ def test_format_startup_failure_message_varies_text_by_startup_error_type(startu
     assert message == expected_message
 
 
-def test_filenotfounderror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """FileNotFoundError from process startup is wrapped in RunningCommandError with a not-found message."""
-    startup_error = FileNotFoundError('missing executable')
-
+@pytest.mark.parametrize(
+    ('startup_error', 'command', 'expected_message'),
+    [
+        (
+            FileNotFoundError('missing executable'),
+            'missing-tool --flag',
+            'The executable for the command "missing-tool --flag" was not found.',
+        ),
+        (
+            PermissionError('permission denied'),
+            'locked-tool --flag',
+            'Permission denied when starting the command "locked-tool --flag".',
+        ),
+        (
+            OSError('generic startup failure'),
+            'broken-tool --flag',
+            'OS error when starting the command "broken-tool --flag".',
+        ),
+    ],
+)
+def test_startup_oserrors_from_popen_are_wrapped_in_running_command_error_with_dedicated_message(
+    startup_error,
+    command,
+    expected_message,
+):
+    """FileNotFoundError, PermissionError, and generic OSError from process startup are wrapped in RunningCommandError with startup-specific messages."""
     with patch.object(_run_module, 'Popen', side_effect=startup_error), \
          pytest.raises(
              RunningCommandError,
-             match=match('The executable for the command "missing-tool --flag" was not found.'),
+             match=match(expected_message),
          ) as exc_info:
-        run('missing-tool --flag')
-
-    assert isinstance(exc_info.value, RunningCommandError)
-    assert exc_info.value.__cause__ is startup_error
-    assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr == ''
-    assert exc_info.value.result.returncode == 1
-    assert exc_info.value.result.killed_by_token is False
-
-
-def test_permissionerror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """PermissionError from process startup is wrapped in RunningCommandError with a permission-denied message."""
-    startup_error = PermissionError('permission denied')
-
-    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
-         pytest.raises(
-             RunningCommandError,
-             match=match('Permission denied when starting the command "locked-tool --flag".'),
-         ) as exc_info:
-        run('locked-tool --flag')
-
-    assert isinstance(exc_info.value, RunningCommandError)
-    assert exc_info.value.__cause__ is startup_error
-    assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr == ''
-    assert exc_info.value.result.returncode == 1
-    assert exc_info.value.result.killed_by_token is False
-
-
-def test_generic_oserror_from_popen_is_wrapped_in_running_command_error_with_dedicated_message():
-    """Any other startup OSError is wrapped in RunningCommandError with a generic startup-failure message."""
-    startup_error = OSError('generic startup failure')
-
-    with patch.object(_run_module, 'Popen', side_effect=startup_error), \
-         pytest.raises(
-             RunningCommandError,
-             match=match('OS error when starting the command "broken-tool --flag".'),
-         ) as exc_info:
-        run('broken-tool --flag')
+        run(command)
 
     assert isinstance(exc_info.value, RunningCommandError)
     assert exc_info.value.__cause__ is startup_error
@@ -905,80 +867,70 @@ def test_runtime_failure_has_none_cause_and_keeps_process_stderr(assert_no_suby_
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
-def test_exec_format_error_original_popen_raises_plain_oserror(tmp_path, assert_no_suby_thread_leaks):
-    """A script without a shebang raises RunningCommandError chained from the original Exec format OSError."""
-    script = tmp_path / 'script-without-shebang'
-    script.write_text('echo hello\n')
-    script.chmod(0o755)
-
-    with assert_no_suby_thread_leaks(), pytest.raises(
-        RunningCommandError,
-        match=match(f'OS error when starting the command "{script}".'),
-    ) as exc_info:
-        run(str(script))
-
-    assert type(exc_info.value.__cause__) is OSError
-    assert 'Exec format error' in str(exc_info.value.__cause__)
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only exec format semantics')
-def test_exec_format_error_with_catch_exceptions_logs_generic_startup_oserror(tmp_path):
-    """A POSIX exec-format startup OSError is logged with the generic startup-failure message."""
+@pytest.mark.parametrize('catch_exceptions', [True, False])
+def test_exec_format_error_is_normalized_in_both_exception_modes(
+    tmp_path,
+    catch_exceptions,
+    assert_no_suby_thread_leaks,
+):
+    """A script without a shebang becomes a generic startup failure both when the result is returned and when RunningCommandError is raised."""
     script = tmp_path / 'script-without-shebang'
     script.write_text('echo hello\n')
     script.chmod(0o755)
     logger = MemoryLogger()
 
-    result = run(str(script), catch_exceptions=True, logger=logger)
+    if catch_exceptions:
+        with assert_no_suby_thread_leaks():
+            result = run(str(script), catch_exceptions=True, logger=logger)
 
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.returncode == 1
-    assert len(logger.data.exception) == 1
-    assert logger.data.exception[0].message == f'OS error when starting the command "{script}".'
+        assert result.stdout == ''
+        assert result.stderr == ''
+        assert result.returncode == 1
+        assert len(logger.data.exception) == 1
+        assert logger.data.exception[0].message == f'OS error when starting the command "{script}".'
+    else:
+        with assert_no_suby_thread_leaks(), pytest.raises(
+            RunningCommandError,
+            match=match(f'OS error when starting the command "{script}".'),
+        ) as exc_info:
+            run(str(script))
+
+        assert type(exc_info.value.__cause__) is OSError
+        assert 'Exec format error' in str(exc_info.value.__cause__)
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
-def test_permission_error_with_catch_exceptions_returns_filled_result(tmp_path):
-    """Permission-denied startup with catch_exceptions=True returns an empty-output result and logs a startup message."""
+@pytest.mark.parametrize('catch_exceptions', [True, False])
+def test_permission_error_is_normalized_in_both_exception_modes(tmp_path, catch_exceptions):
+    """Permission-denied startup fills the startup-failure result in both modes and logs the startup message when exceptions are caught."""
     script = tmp_path / 'script.sh'
     script.write_text('echo hello')
     script.chmod(0o644)
     logger = MemoryLogger()
 
-    result = run(str(script), catch_exceptions=True, logger=logger)
+    if catch_exceptions:
+        result = run(str(script), catch_exceptions=True, logger=logger)
+        assert len(logger.data.exception) == 1
+        assert logger.data.exception[0].message == f'Permission denied when starting the command "{script}".'
+    else:
+        with pytest.raises(
+            RunningCommandError,
+            match=match(f'Permission denied when starting the command "{script}".'),
+        ) as exc_info:
+            run(str(script))
+        result = exc_info.value.result
 
     assert result.stdout == ''
     assert result.stderr == ''
     assert result.returncode == 1
     assert result.killed_by_token is False
-    assert len(logger.data.exception) == 1
-    assert logger.data.exception[0].message == f'Permission denied when starting the command "{script}".'
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX-only permission semantics')
-def test_permission_error_without_catch_exceptions_attaches_filled_result(tmp_path):
-    """Permission-denied startup raises RunningCommandError with an empty-output result and returncode=1."""
-    script = tmp_path / 'script.sh'
-    script.write_text('echo hello')
-    script.chmod(0o644)
-
-    with pytest.raises(
-        RunningCommandError,
-        match=match(f'Permission denied when starting the command "{script}".'),
-    ) as exc_info:
-        run(str(script))
-
-    assert exc_info.value.result.stdout == ''
-    assert exc_info.value.result.stderr == ''
-    assert exc_info.value.result.returncode == 1
-    assert exc_info.value.result.killed_by_token is False
 
 
 def test_multiple_strings_split_independently():
-    # 'python -c' splits to ['python', '-c'], '"print(777)"' splits to ['print(777)']
-    # each string is split independently and the results are concatenated
-    """Each string argument is split independently, then all subprocess argument pieces are concatenated."""
+    """Each string argument is split independently, then all subprocess argument pieces are concatenated.
+
+    For example, 'python -c' becomes ['python', '-c'] and '"print(777)"' becomes ['print(777)'].
+    """
     result = run('python -c', '"print(777)"', catch_output=True)
 
     assert result.returncode == 0
@@ -986,7 +938,6 @@ def test_multiple_strings_split_independently():
 
 
 def test_argument_with_space_passed_with_split_false():
-    # with split=False the string is passed as-is, spaces are not treated as delimiters
     """With split=False, a value containing spaces is passed as a single command-line argument."""
     result = run(
         sys.executable,
@@ -1003,6 +954,7 @@ def test_argument_with_space_passed_with_split_false():
 @pytest.mark.parametrize(
     'error_name',
     [
+        'ConditionCancellationError',
         'RunningCommandError',
         'WrongCommandError',
         'TimeoutCancellationError',
@@ -1013,10 +965,16 @@ def test_errors_are_importable_from_suby(error_name):
     assert hasattr(suby, error_name)
 
 
-def test_already_cancelled_simple_token_kills_process():
-    """With catch_exceptions=True, an already-cancelled token returns killed_by_token=True and a non-zero returncode."""
-    token = SimpleToken()
-    token.cancel()
+@pytest.mark.parametrize(
+    'token_factory',
+    [
+        pytest.param(lambda: SimpleToken().cancel(), id='simple-token'),
+        pytest.param(lambda: ConditionToken(lambda: True), id='condition-token'),
+    ],
+)
+def test_pre_cancelled_token_returns_killed_result_with_catch_exceptions(token_factory):
+    """With catch_exceptions=True, a token cancelled before startup returns killed_by_token=True and a non-zero returncode."""
+    token = token_factory()
 
     result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
 
@@ -1031,16 +989,6 @@ def test_already_cancelled_simple_token_raises():
 
     with pytest.raises(CancellationError):
         run('python -c "import time; time.sleep(100)"', token=token)
-
-
-def test_immediately_satisfied_condition_token_kills_process():
-    """With catch_exceptions=True, a token whose condition is already true returns a killed result."""
-    token = ConditionToken(lambda: True)
-
-    result = run('python -c "import time; time.sleep(100)"', token=token, catch_exceptions=True)
-
-    assert result.killed_by_token == True
-    assert result.returncode != 0
 
 
 def test_timeout_exception_message():
@@ -1140,26 +1088,19 @@ def test_too_long_command_string_is_normalized_on_windows():
     assert exc_info.value.result.killed_by_token is False
 
 
-def test_very_large_output_is_handled_without_a_huge_command_line():
-    """A very large stdout payload is captured even when the command line itself stays short."""
+@pytest.mark.parametrize(
+    ('command', 'result_attr', 'expected_output'),
+    [
+        ('print("x" * {payload_size})', 'stdout', 'x' * 100_000 + '\n'),
+        ('import sys; sys.stderr.write("x" * {payload_size})', 'stderr', 'x' * 100_000),
+    ],
+)
+def test_very_large_output_is_handled_without_a_huge_command_line(command, result_attr, expected_output):
+    """A very large stdout or stderr payload is captured even when the command line itself stays short."""
     payload_size = 100_000
-    result = run(sys.executable, '-c', f'print("x" * {payload_size})', split=False, catch_output=True)
+    result = run(sys.executable, '-c', command.format(payload_size=payload_size), split=False, catch_output=True)
 
-    assert result.stdout == 'x' * payload_size + '\n'
-
-
-def test_very_large_stderr_output_is_handled_without_a_huge_command_line():
-    """A very large stderr payload is captured even when the command line itself stays short."""
-    payload_size = 100_000
-    result = run(
-        sys.executable,
-        '-c',
-        f'import sys; sys.stderr.write("x" * {payload_size})',
-        split=False,
-        catch_output=True,
-    )
-
-    assert result.stderr == 'x' * payload_size
+    assert getattr(result, result_attr) == expected_output
 
 
 def test_command_with_nul_byte_is_rejected_consistently():
@@ -1191,15 +1132,6 @@ def test_path_with_spaces_and_special_characters_executes_via_path_object(tmp_pa
     result = run(Path(sys.executable), executable, split=False, catch_output=True)
 
     assert result.stdout == 'ok\n'
-
-
-def test_run_uses_dedicated_stdout_thread():
-    """run() starts the dedicated stdout reader thread and still captures stdout."""
-    with patch.object(_run_module, 'run_stdout_thread', wraps=_run_module.run_stdout_thread) as wrapped:
-        result = run(sys.executable, '-c', 'print("ok")', split=False, catch_output=True)
-
-    assert result.stdout == 'ok\n'
-    wrapped.assert_called_once()
 
 
 def test_kill_process_if_running_ignores_process_lookup_error():
@@ -1292,13 +1224,6 @@ def test_split_false_with_empty_executable_is_rejected():
         run('', split=False)
 
 
-def test_split_false_with_path_object_still_executes():
-    """With split=False, a Path executable plus explicit arguments still starts successfully."""
-    result = run(Path(sys.executable), '-c', 'print("ok")', split=False, catch_output=True)
-
-    assert result.stdout == 'ok\n'
-
-
 def test_double_backslash_does_not_change_path_objects():
     """double_backslash only rewrites string arguments before shlex splitting, not Path arguments."""
     arguments = (Path(r'folder\subdir\tool.exe'),)
@@ -1333,20 +1258,6 @@ def test_unc_path_is_passed_to_popen_without_backslash_loss_on_windows():
     assert result.returncode == 1
     assert result.killed_by_token is False
     assert mock_popen.call_args.args[0] == expected_argv
-
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='Non-Windows-only behavior')
-def test_double_backslash_true_changes_non_windows_argument_shape():
-    """On non-Windows, double_backslash=True changes how a backslash-space argument is split into subprocess args."""
-    result = run(
-        sys.executable,
-        '-c "import sys; print(sys.argv[1:])"',
-        r'hello\ world',
-        double_backslash=True,
-        catch_output=True,
-    )
-
-    assert result.stdout != "['hello world']\n"
 
 
 @pytest.mark.parametrize(
@@ -1613,6 +1524,41 @@ def test_read_stream_second_failure_keeps_first_error_and_does_not_set_wake_even
     assert state.wake_event.is_set() is False
 
 
+def test_read_stream_cancelled_custom_token_kills_process_before_reading():
+    """A reader thread polls a cancelled custom token before readline(), kills the process, and exits without buffering new output."""
+    class FakeProcess:
+        def __init__(self):
+            self.was_killed = False
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.was_killed = True
+
+    token = SimpleToken()
+    token.cancel()
+    state = _run_module._ExecutionState()
+    buffer: List[str] = []
+    process = FakeProcess()
+
+    _run_module.read_stream(
+        process,
+        StringIO('hello\n'),
+        buffer,
+        True,
+        lambda _line: (_ for _ in ()).throw(RuntimeError('callback should not run')),
+        token,
+        state,
+    )
+
+    assert process.was_killed is True
+    assert state.result.killed_by_token is True
+    assert buffer == []
+    assert state.failure_state.error is None
+    assert state.wake_event.is_set() is False
+
+
 @pytest.mark.parametrize(
     ('callback_kwarg', 'command', 'error_message'),
     [
@@ -1633,12 +1579,12 @@ def test_timeout_and_callback_error_race_raises_either_exception_with_killed_res
     command,
     error_message,
 ):
-    """If timeout cancellation and a callback failure race, either exception may win but the result still looks killed.
+    """If timeout cancellation and a callback failure race, either exception may win but the returncode still follows the platform kill contract.
 
-    The kill return code check is strict only on POSIX, because Windows does not use -9 for killed processes.
+    TimeoutCancellationError always sets killed_by_token=True. If a callback RuntimeError wins, killed_by_token can be either
+    False or True depending on whether the timeout helper killed the process before the callback failure was propagated.
     """
     returncodes = []
-    killed_flags = set()
 
     for _ in range(5):
         def callback(_: str):
@@ -1663,11 +1609,12 @@ def test_timeout_and_callback_error_race_raises_either_exception_with_killed_res
         assert isinstance(result.stdout, str)
         assert isinstance(result.stderr, str)
         returncodes.append(result.returncode)
-        killed_flags.add(result.killed_by_token)
+
+        if isinstance(exc_info.value, TimeoutCancellationError):
+            assert result.killed_by_token is True
 
     for returncode in returncodes:
         _assert_kill_returncode_matches_platform(returncode)
-    assert killed_flags.issubset({False, True})
 
 
 @pytest.mark.skipif(not _run_module.has_event_driven_wait(), reason='Requires the event-driven timeout helper thread')
@@ -1803,50 +1750,54 @@ def test_existing_result_attribute_on_callback_exception_is_not_overwritten():
     assert exc_info.value.result is preserved_result  # type: ignore[attr-defined]
 
 
-def test_result_getter_failure_does_not_mask_original_exception():
-    """If reading exception.result itself fails, run() still raises the original callback exception."""
-    class ExplodingResultGetterError(RuntimeError):
-        @property
-        def result(self) -> SubprocessResult:
-            raise RuntimeError('result getter exploded')
+@pytest.mark.parametrize(
+    'exception_factory',
+    [
+        pytest.param(
+            lambda: type(
+                'ExplodingResultGetterError',
+                (RuntimeError,),
+                {'result': property(lambda _self: (_ for _ in ()).throw(RuntimeError('result getter exploded')))},
+            )('stdout callback exploded'),
+            id='getter',
+        ),
+        pytest.param(
+            lambda: type(
+                'ExplodingResultSetterError',
+                (RuntimeError,),
+                {
+                    'result': property(
+                        lambda _self: None,
+                        lambda _self, _value: (_ for _ in ()).throw(RuntimeError('result setter exploded')),
+                    ),
+                },
+            )('stdout callback exploded'),
+            id='setter',
+        ),
+        pytest.param(
+            lambda: type(
+                'ExplodingResultAssignmentError',
+                (RuntimeError,),
+                {
+                    '__setattr__': lambda self, name, value: (
+                        (_ for _ in ()).throw(RuntimeError('result assignment exploded'))
+                        if name == 'result'
+                        else super(type(self), self).__setattr__(name, value)
+                    ),
+                },
+            )('stdout callback exploded'),
+            id='setattr',
+        ),
+    ],
+)
+def test_result_attachment_failures_do_not_mask_original_exception(exception_factory):
+    """If reading or assigning exception.result fails, run() still raises the original callback exception."""
+    error = exception_factory()
 
     def callback(_: str):
-        raise ExplodingResultGetterError('stdout callback exploded')
+        raise error
 
-    with pytest.raises(ExplodingResultGetterError, match='stdout callback exploded'):
-        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
-
-
-def test_result_setter_failure_does_not_mask_original_exception():
-    """If assigning exception.result through a setter fails, run() still raises the original callback exception."""
-    class ExplodingResultSetterError(RuntimeError):
-        @property
-        def result(self):
-            return None
-
-        @result.setter
-        def result(self, _value: SubprocessResult):
-            raise RuntimeError('result setter exploded')
-
-    def callback(_: str):
-        raise ExplodingResultSetterError('stdout callback exploded')
-
-    with pytest.raises(ExplodingResultSetterError, match='stdout callback exploded'):
-        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
-
-
-def test_result_assignment_failure_does_not_mask_original_exception():
-    """If exception.__setattr__('result', ...) fails, run() still raises the original callback exception."""
-    class ExplodingResultAssignmentError(RuntimeError):
-        def __setattr__(self, name: str, value: object):
-            if name == 'result':
-                raise RuntimeError('result assignment exploded')
-            super().__setattr__(name, value)
-
-    def callback(_: str):
-        raise ExplodingResultAssignmentError('stdout callback exploded')
-
-    with pytest.raises(ExplodingResultAssignmentError, match='stdout callback exploded'):
+    with pytest.raises(type(error), match='stdout callback exploded'):
         run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=callback)
 
 
@@ -1874,6 +1825,57 @@ def test_attach_result_to_exception_handles_object_without_dict():
     result.returncode = 0
 
     _run_module.attach_result_to_exception(object(), result)  # type: ignore[arg-type]
+
+
+def test_attach_result_to_exception_preserves_class_level_result_descriptor():
+    """A result descriptor defined on the exception class itself is not invoked or shadowed by attach_result_to_exception()."""
+    descriptor_calls = []
+
+    class ResultDescriptor:
+        def __get__(self, _instance, _owner):
+            return 'class-level-result'
+
+        def __set__(self, _instance, _value):
+            descriptor_calls.append('set-called')
+
+    class ResultDescriptorError(RuntimeError):
+        result = ResultDescriptor()
+
+    error = ResultDescriptorError('boom')
+    result = SubprocessResult()
+
+    _run_module.attach_result_to_exception(error, result)
+
+    assert descriptor_calls == []
+    assert 'result' not in error.__dict__
+    assert error.result == 'class-level-result'
+
+
+def test_attach_result_to_exception_preserves_inherited_result_descriptor():
+    """A result descriptor inherited from a base exception class is also preserved and must not be shadowed on the instance."""
+    descriptor_calls = []
+
+    class ResultDescriptor:
+        def __get__(self, _instance, _owner):
+            return 'inherited-class-level-result'
+
+        def __set__(self, _instance, _value):
+            descriptor_calls.append('set-called')
+
+    class BaseResultDescriptorError(RuntimeError):
+        result = ResultDescriptor()
+
+    class ChildResultDescriptorError(BaseResultDescriptorError):
+        pass
+
+    error = ChildResultDescriptorError('boom')
+    result = SubprocessResult()
+
+    _run_module.attach_result_to_exception(error, result)
+
+    assert descriptor_calls == []
+    assert 'result' not in error.__dict__
+    assert error.result == 'inherited-class-level-result'
 
 
 def test_raise_background_failure_ignores_wait_oserror_and_preserves_original_exception():
@@ -1910,6 +1912,19 @@ def test_raise_background_failure_ignores_wait_oserror_and_preserves_original_ex
     assert exc_info.value.result.stdout == 'partial-out'  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == 'partial-err'  # type: ignore[attr-defined]
     assert exc_info.value.result.returncode == 1  # type: ignore[attr-defined]
+
+
+def test_fill_result_uses_one_as_fallback_returncode_when_process_returncode_is_none():
+    """fill_result() converts a missing process returncode to exactly 1 while preserving collected stdout/stderr buffers."""
+    state = _run_module._ExecutionState()
+    state.stdout_buffer.append('partial-out')
+    state.stderr_buffer.append('partial-err')
+
+    _run_module.fill_result(state, None)
+
+    assert state.result.stdout == 'partial-out'
+    assert state.result.stderr == 'partial-err'
+    assert state.result.returncode == 1
 
 
 def test_slow_stdout_callback_does_not_prevent_completion():
@@ -1950,16 +1965,16 @@ def test_callbacks_must_be_callable(run_kwargs, command):
 
 
 @pytest.mark.parametrize(
-    ('run_kwargs', 'command', 'expected_stdout', 'expected_stderr'),
+    ('callback_kwarg', 'command', 'expected_stdout', 'expected_stderr'),
     [
         (
-            {'stdout_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stdout callback should not be called'))},
+            'stdout_callback',
             'print("hello")',
             'hello\n',
             '',
         ),
         (
-            {'stderr_callback': lambda _: (_ for _ in ()).throw(RuntimeError('stderr callback should not be called'))},
+            'stderr_callback',
             'import sys; sys.stderr.write("hello\\n")',
             '',
             'hello\n',
@@ -1967,13 +1982,19 @@ def test_callbacks_must_be_callable(run_kwargs, command):
     ],
 )
 def test_catch_output_true_bypasses_callbacks_entirely(
-    run_kwargs,
+    callback_kwarg,
     command,
     expected_stdout,
     expected_stderr,
     assert_no_suby_thread_leaks,
 ):
     """With catch_output=True, custom callbacks are bypassed entirely and output is only stored in the result."""
+    seen: List[str] = []
+
+    def callback(text: str) -> None:
+        seen.append(text)
+        raise RuntimeError('callback should not be called')
+
     with assert_no_suby_thread_leaks():
         result = run(
             sys.executable,
@@ -1982,9 +2003,10 @@ def test_catch_output_true_bypasses_callbacks_entirely(
             split=False,
             catch_output=True,
             catch_exceptions=True,
-            **run_kwargs,
+            **{callback_kwarg: callback},
         )
 
+    assert seen == []
     assert result.stdout == expected_stdout
     assert result.stderr == expected_stderr
 
@@ -2038,6 +2060,28 @@ def test_non_cancelling_custom_token_is_handled(run_kwargs):
     assert result.returncode == 0
 
 
+@pytest.mark.parametrize(
+    ('use_event_driven_timeout', 'token_factory', 'expected_should_poll_manually', 'expected_poll_timeout_seconds'),
+    [
+        (False, DefaultToken, False, None),
+        (True, DefaultToken, False, None),
+        (False, SimpleToken, True, 0.0001),
+        (True, SimpleToken, False, None),
+    ],
+)
+def test_manual_token_polling_helpers_distinguish_default_and_custom_token_paths(
+    use_event_driven_timeout,
+    token_factory,
+    expected_should_poll_manually,
+    expected_poll_timeout_seconds,
+):
+    """Manual token polling is enabled only for custom tokens without event-driven timeout, and then the wake timeout is exactly 0.0001 seconds."""
+    token = token_factory()
+
+    assert _run_module.should_poll_token_manually(use_event_driven_timeout, token) is expected_should_poll_manually
+    assert _run_module.get_manual_token_poll_timeout_seconds(use_event_driven_timeout, token) == expected_poll_timeout_seconds
+
+
 def test_condition_token_with_unsuppressed_exception_raises_on_bool_before_run():
     """With suppress_exceptions=False, evaluating bool(token) propagates the token-condition exception."""
     def boom() -> bool:
@@ -2076,7 +2120,7 @@ def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run(ass
     ],
 )
 def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions(delayed_error, assert_no_suby_thread_leaks):
-    """A process that produces no output raises either the token error or timeout.
+    """A process that produces no output raises either the token callback's RuntimeError or TimeoutCancellationError.
 
     delayed_error=False means the token condition raises immediately. delayed_error=True means it returns False a
     few times first, so timeout cancellation can win that race before the token error is observed.
@@ -2290,43 +2334,31 @@ def test_interleaved_stdout_and_stderr_are_both_collected():
     assert 'err-0\n' in result.stderr
 
 
-def test_non_utf8_output_is_rejected_or_normalized():
-    """Non-UTF-8 stdout bytes are rejected consistently under explicit UTF-8 strict decoding."""
+@pytest.mark.parametrize('fd', [1, 2])
+def test_non_utf8_output_is_rejected_consistently(fd):
+    """Non-UTF-8 stdout/stderr bytes are rejected consistently under explicit UTF-8 strict decoding."""
     with pytest.raises(UnicodeDecodeError):
-        run(sys.executable, '-c', 'import os; os.write(1, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
+        run(sys.executable, '-c', f'import os; os.write({fd}, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
 
 
-def test_non_utf8_stderr_is_rejected_consistently():
-    """Non-UTF-8 stderr bytes are rejected consistently under explicit UTF-8 strict decoding."""
-    with pytest.raises(UnicodeDecodeError):
-        run(sys.executable, '-c', 'import os; os.write(2, b"\\xff\\xfe\\xfd")', split=False, catch_output=True)
-
-
-def test_utf8_stdout_accepts_non_ascii_text():
-    """Explicit UTF-8 decoding preserves non-ASCII stdout bytes emitted by the child process."""
+@pytest.mark.parametrize(
+    ('fd', 'result_attr'),
+    [
+        (1, 'stdout'),
+        (2, 'stderr'),
+    ],
+)
+def test_utf8_output_accepts_non_ascii_text(fd, result_attr):
+    """Explicit UTF-8 decoding preserves non-ASCII stdout/stderr bytes emitted by the child process."""
     result = run(
         sys.executable,
         '-c',
-        'import os; os.write(1, "привет\\n".encode("utf-8"))',
+        f'import os; os.write({fd}, "привет\\n".encode("utf-8"))',
         split=False,
         catch_output=True,
     )
 
-    assert result.stdout == 'привет\n'
-    assert result.returncode == 0
-
-
-def test_utf8_stderr_accepts_non_ascii_text():
-    """Explicit UTF-8 decoding preserves non-ASCII stderr bytes emitted by the child process."""
-    result = run(
-        sys.executable,
-        '-c',
-        'import os; os.write(2, "привет\\n".encode("utf-8"))',
-        split=False,
-        catch_output=True,
-    )
-
-    assert result.stderr == 'привет\n'
+    assert getattr(result, result_attr) == 'привет\n'
     assert result.returncode == 0
 
 
@@ -2350,21 +2382,6 @@ def test_complex_kwargs_combination_is_well_formed():
     assert result.returncode == 0
 
 
-def test_catch_output_true_suppresses_stdout_callback_even_in_complex_case():
-    """With catch_output=True, stdout_callback is bypassed even when no other custom behavior is involved."""
-    seen: List[str] = []
-    run(
-        sys.executable,
-        '-c',
-        'print("ok")',
-        split=False,
-        catch_output=True,
-        stdout_callback=seen.append,
-    )
-
-    assert seen == []
-
-
 def test_error_paths_return_consistent_subprocess_result_shapes():
     """Startup failure, runtime failure, and timeout cancellation all return SubprocessResult objects with the same field types."""
     results: List[SubprocessResult] = []
@@ -2379,21 +2396,6 @@ def test_error_paths_return_consistent_subprocess_result_shapes():
         assert isinstance(result.stderr, str)
         assert isinstance(result.returncode, int)
         assert isinstance(result.killed_by_token, bool)
-
-
-def test_logging_contract_across_outcomes_is_explicit():
-    """Success, runtime failure, and startup failure each produce the expected category of log records."""
-    success_logger = MemoryLogger()
-    error_logger = MemoryLogger()
-    startup_logger = MemoryLogger()
-
-    run(sys.executable, '-c', 'print("ok")', split=False, catch_output=True, logger=success_logger)
-    run(sys.executable, '-c', 'import sys; sys.exit(1)', split=False, catch_exceptions=True, catch_output=True, logger=error_logger)
-    run('definitely_missing_command_for_suby_logging', catch_exceptions=True, logger=startup_logger)
-
-    assert len(success_logger.data.info) >= 1
-    assert len(error_logger.data.error) + len(error_logger.data.exception) >= 1
-    assert len(startup_logger.data.exception) >= 1
 
 
 def test_parallel_runs_with_shared_callback_do_not_drop_events():

@@ -13,8 +13,8 @@ from suby import RunningCommandError, TimeoutCancellationError, run
 from suby.subprocess_result import SubprocessResult
 
 
-def test_run_hello_world():
-    """The hello-world command is echoed to stdout, captured in result.stdout, and leaves stderr empty."""
+def test_run_hello_world_and_result_repr_format():
+    """The hello-world command is echoed to stdout, captured in result.stdout, and keeps the documented SubprocessResult repr format."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -28,15 +28,6 @@ def test_run_hello_world():
     assert result.stderr == ''
     assert result.returncode == 0
     assert not result.killed_by_token
-
-
-def test_result_repr_format():
-    """The README result example should keep the documented SubprocessResult repr format."""
-    stderr_buffer = StringIO()
-    stdout_buffer = StringIO()
-
-    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        result = run('python -c "print(\'hello, world!\')"')
 
     assert re.fullmatch(
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='hello, world!\\n', stderr='', returncode=0, killed_by_token=False\)",
@@ -134,28 +125,34 @@ def test_catch_output_suppresses_console_output():
     assert result.stdout == 'hello, world!\n'
 
 
-def test_logging_on_success():
-    """A successful README command logs one INFO message at start and one INFO message at completion."""
+@pytest.mark.parametrize(
+    ('command', 'run_kwargs', 'expected_info', 'expected_error'),
+    [
+        (
+            'python -c pass',
+            {'catch_output': True},
+            [
+                'The beginning of the execution of the command "python -c pass".',
+                'The command "python -c pass" has been successfully executed.',
+            ],
+            [],
+        ),
+        (
+            'python -c "raise ValueError"',
+            {'catch_exceptions': True, 'catch_output': True},
+            ['The beginning of the execution of the command "python -c "raise ValueError"".'],
+            ['Error when executing the command "python -c "raise ValueError"".'],
+        ),
+    ],
+)
+def test_logging_examples(command, run_kwargs, expected_info, expected_error):
+    """Successful and failing README commands keep the documented INFO/ERROR logging messages."""
     logger = MemoryLogger()
 
-    run('python -c pass', logger=logger, catch_output=True)
+    run(command, logger=logger, **run_kwargs)
 
-    assert len(logger.data.info) == 2
-    assert len(logger.data.error) == 0
-    assert logger.data.info[0].message == 'The beginning of the execution of the command "python -c pass".'
-    assert logger.data.info[1].message == 'The command "python -c pass" has been successfully executed.'
-
-
-def test_logging_on_error():
-    """A failing README command with catch_exceptions=True logs INFO at start and ERROR at failure."""
-    logger = MemoryLogger()
-
-    run('python -c "raise ValueError"', logger=logger, catch_exceptions=True, catch_output=True)
-
-    assert len(logger.data.info) == 1
-    assert len(logger.data.error) == 1
-    assert logger.data.info[0].message == 'The beginning of the execution of the command "python -c "raise ValueError"".'
-    assert logger.data.error[0].message == 'Error when executing the command "python -c "raise ValueError"".'
+    assert [entry.message for entry in logger.data.info] == expected_info
+    assert [entry.message for entry in logger.data.error] == expected_error
 
 
 def test_running_command_error_message_is_printed():
@@ -169,7 +166,7 @@ def test_running_command_error_message_is_printed():
 
 
 def test_catch_exceptions_with_timeout_returns_result():
-    """With catch_exceptions=True, a timeout returns a result object with empty output and a non-zero return code."""
+    """With catch_exceptions=True, a timeout returns a killed result object with empty output and the documented repr shape."""
     result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
 
     assert result.stdout == ''
@@ -177,38 +174,9 @@ def test_catch_exceptions_with_timeout_returns_result():
     assert result.returncode != 0
     assert result.killed_by_token == True
 
-
-def test_timeout_cancellation_error_carries_result():
-    """TimeoutCancellationError carries a result object and keeps the documented timeout-expired message."""
-    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')) as exc_info:
-        run('python -c "import time; time.sleep(10_000)"', timeout=1)
-
-    assert isinstance(exc_info.value.result, SubprocessResult)
-
-
-def test_timeout_cancellation_error_result_fields():
-    """TimeoutCancellationError.result carries empty output, a non-zero return code, and killed_by_token=True."""
-    try:
-        run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
-    except TimeoutCancellationError as e:
-        result = e.result
-
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.returncode != 0
-    assert result.killed_by_token == True
-
-
-def test_timeout_cancellation_error_result_repr():
-    """TimeoutCancellationError.result keeps the documented SubprocessResult repr shape."""
-    try:
-        run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
-    except TimeoutCancellationError as e:
-        result_repr = repr(e.result)
-
     assert re.fullmatch(
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='', stderr='', returncode=-?\d+, killed_by_token=True\)",
-        result_repr,
+        repr(result),
     ) is not None
 
 
@@ -221,7 +189,7 @@ def test_condition_token_raises_when_cancelled():
 
 
 def test_condition_token_with_catch_exceptions_returns_result():
-    """With catch_exceptions=True, cancellation returns a SubprocessResult with killed_by_token=True instead of raising."""
+    """With catch_exceptions=True, cancellation returns a killed SubprocessResult and keeps the documented repr shape instead of raising."""
     token = ConditionToken(lambda: True)
 
     result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
@@ -230,13 +198,6 @@ def test_condition_token_with_catch_exceptions_returns_result():
     assert result.stderr == ''
     assert result.returncode != 0
     assert result.killed_by_token == True
-
-
-def test_condition_token_result_repr():
-    """The result returned after ConditionToken cancellation keeps the documented repr shape."""
-    token = ConditionToken(lambda: True)
-
-    result = run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True)
 
     assert re.fullmatch(
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='', stderr='', returncode=-?\d+, killed_by_token=True\)",
@@ -244,37 +205,19 @@ def test_condition_token_result_repr():
     ) is not None
 
 
-def test_timeout_raises_timeout_cancellation_error():
-    """A timeout raises TimeoutCancellationError with the documented timeout-expired message."""
-    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')):
+def test_timeout_raises_timeout_cancellation_error_with_result_and_documented_message():
+    """A timeout raises TimeoutCancellationError with the documented message and a killed result that keeps the documented repr shape."""
+    with pytest.raises(TimeoutCancellationError, match=match('The timeout of 1 seconds has expired.')) as exc_info:
         run('python -c "import time; time.sleep(10_000)"', timeout=1)
 
-
-def test_timeout_error_message():
-    """TimeoutCancellationError's message should mention that the timeout in seconds has expired."""
-    try:
-        run('python -c "import time; time.sleep(10_000)"', timeout=0.001)
-    except TimeoutCancellationError as e:
-        message = str(e)
-
-    assert 'seconds has expired' in message
-
-
-def test_timeout_with_catch_exceptions_returns_result():
-    """With catch_exceptions=True, timeout cancellation returns a killed result instead of raising."""
-    result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
-
-    assert result.stdout == ''
-    assert result.stderr == ''
-    assert result.returncode != 0
-    assert result.killed_by_token == True
-
-
-def test_timeout_result_repr():
-    """The result returned after timeout cancellation keeps the documented repr shape."""
-    result = run('python -c "import time; time.sleep(10_000)"', timeout=0.001, catch_exceptions=True)
+    assert isinstance(exc_info.value.result, SubprocessResult)
+    assert exc_info.value.result.stdout == ''
+    assert exc_info.value.result.stderr == ''
+    assert exc_info.value.result.returncode != 0
+    assert exc_info.value.result.killed_by_token == True
+    assert 'seconds has expired' in str(exc_info.value)
 
     assert re.fullmatch(
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='', stderr='', returncode=-?\d+, killed_by_token=True\)",
-        repr(result),
+        repr(exc_info.value.result),
     ) is not None

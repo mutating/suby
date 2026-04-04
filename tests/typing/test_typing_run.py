@@ -1,3 +1,4 @@
+import os
 from pathlib import Path, PurePath
 from typing import Any, Optional, Tuple, TypedDict, Union
 
@@ -13,6 +14,12 @@ from suby import (
     run,
 )
 from suby.subprocess_result import SubprocessResult
+
+if 'MUTANT_UNDER_TEST' in os.environ or '/mutants/tests/typing/' in __file__.replace('\\', '/'):
+    pytest.skip(
+        'mutmut executes runtime tests only; mypy snippets are checked by dedicated CI lint jobs.',
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture(autouse=True)

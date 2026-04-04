@@ -7,9 +7,26 @@ from platform import system
 from shlex import split as shlex_split
 from subprocess import PIPE, Popen
 from threading import Event, Lock, Thread
-from typing import IO, Any, Callable, Dict, List, Mapping, Optional, Tuple, Union, cast
+from typing import (
+    IO,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
-from cantok import AbstractToken, CancellationError, DefaultToken, TimeoutToken
+from cantok import (
+    AbstractToken,
+    CancellationError,
+    DefaultToken,
+    TimeoutToken,
+)
 from cantok import ConditionCancellationError as CantokConditionCancellationError
 from cantok import TimeoutCancellationError as CantokTimeoutCancellationError
 from emptylog import EmptyLogger, LoggerProtocol
@@ -25,6 +42,11 @@ from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
 StreamCallback = Callable[[str], Any]  # type: ignore[misc]
+_CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
+_CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
+    CantokConditionCancellationError: ConditionCancellationError,
+    CantokTimeoutCancellationError: TimeoutCancellationError,
+}
 
 
 class _FailureState:
@@ -111,17 +133,15 @@ def run(  # noqa: PLR0913, PLR0915
                 raise_failure_if_needed(process, reader_threads, state)
                 if state.process_exit_event.is_set():
                     break
-                timeout_seconds = 0.0001 if not use_event_driven_timeout and not isinstance(token, DefaultToken) else None
-                state.wake_event.wait(timeout_seconds)
+                state.wake_event.wait(get_manual_token_poll_timeout_seconds(use_event_driven_timeout, token))
                 state.wake_event.clear()
-                if not use_event_driven_timeout and not isinstance(token, DefaultToken):
+                if should_poll_token_manually(use_event_driven_timeout, token):
                     try:
                         if not token:
                             kill_process_if_running(process)
                             state.result.killed_by_token = True
                     except Exception as error:  # noqa: BLE001
-                        if state.failure_state.set(error):
-                            state.wake_event.set()
+                        state.failure_state.set(error)
                         raise_failure_if_needed(process, reader_threads, state)
 
             join_reader_threads(reader_threads)
@@ -245,6 +265,19 @@ def timeout_wait(process: Popen[str], timeout: Union[int, float], result: Subpro
             result.killed_by_token = True
 
 
+def should_poll_token_manually(use_event_driven_timeout: bool, token: AbstractToken) -> bool:
+    return not use_event_driven_timeout and not isinstance(token, DefaultToken)
+
+
+def get_manual_token_poll_timeout_seconds(
+    use_event_driven_timeout: bool,
+    token: AbstractToken,
+) -> Optional[float]:
+    if should_poll_token_manually(use_event_driven_timeout, token):
+        return _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS
+    return None
+
+
 def read_stream(  # noqa: PLR0913
     process: Popen[str],
     stream: IO[str],
@@ -256,22 +289,22 @@ def read_stream(  # noqa: PLR0913
 ) -> None:
     while True:
         if state.failure_state.error is not None:
-            break
+            return
         try:
             if not isinstance(token, DefaultToken) and not token:
                 kill_process_if_running(process)
                 state.result.killed_by_token = True
-                break
+                return
             line = stream.readline()
-            if line == '':
-                break
+            if not line:
+                return
             buffer.append(line)
             if not catch_output:
                 callback(line)
         except Exception as error:  # noqa: BLE001
             if state.failure_state.set(error):
                 state.wake_event.set()
-            break
+            return
 
 
 def wait_for_process_exit_and_signal(process: Popen[str], state: _ExecutionState) -> None:
@@ -359,7 +392,7 @@ def attach_result_to_exception(error: BaseException, result: SubprocessResult) -
 
 
 def normalize_cancellation_error(error: CancellationError) -> None:
-    if type(error) is CantokConditionCancellationError:
-        error.__class__ = ConditionCancellationError
-    elif type(error) is CantokTimeoutCancellationError:
-        error.__class__ = TimeoutCancellationError
+    normalized_error_type = _CANCELLATION_ERROR_TYPES.get(type(error))
+
+    if normalized_error_type is not None:
+        error.__class__ = normalized_error_type

@@ -1,5 +1,7 @@
 import re
+import sys
 
+from suby import run
 from suby.subprocess_result import SubprocessResult
 
 
@@ -12,6 +14,14 @@ def test_generated_id_has_expected_shape_and_is_unique():
     assert isinstance(first_id, str)
     assert len(first_id) == 32
     assert '-' not in first_id
+
+
+def test_same_command_run_results_have_distinct_ids():
+    """Two results produced by the same command still have different ids, so callers can distinguish repeated runs."""
+    first_result = run(sys.executable, '-c', 'pass', split=False)
+    second_result = run(sys.executable, '-c', 'pass', split=False)
+
+    assert first_result.id != second_result.id
 
 
 def test_default_values():
