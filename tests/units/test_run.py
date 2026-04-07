@@ -1553,6 +1553,35 @@ def test_read_stream_cancelled_custom_token_kills_process_before_reading():
     assert state.wake_event.is_set() is False
 
 
+def test_read_stream_ignores_line_if_failure_was_already_recorded_after_readline():
+    """If another thread records a failure before the fetched line is handled, read_stream exits without buffering or callback delivery."""
+    class FakeProcess:
+        def poll(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    state = _run_module._ExecutionState()
+    state.failure_state.set(RuntimeError('already recorded elsewhere'))
+    buffer: List[str] = []
+    seen: List[str] = []
+
+    _run_module.read_stream(
+        FakeProcess(),
+        StringIO('late-line\n'),
+        buffer,
+        False,
+        seen.append,
+        DefaultToken(),
+        state,
+    )
+
+    assert buffer == []
+    assert seen == []
+    assert state.wake_event.is_set() is False
+
+
 @pytest.mark.parametrize(
     ('callback_kwarg', 'command', 'error_message'),
     [
