@@ -47,10 +47,10 @@ jobs:
         pth_file="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/suby_coverage_process_startup.pth"
         printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
         coverage erase
-        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run --branch -m pytest -n auto --cache-clear --assert=plain
+        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
         coverage combine
-        coverage report -m --fail-under=100
-        coverage xml
+        coverage report -m --fail-under=100 --omit='*tests*'
+        coverage xml --omit='*tests*'
 
     - name: Upload coverage to Coveralls
       if: runner.os == 'Linux' && matrix.python-version == '3.13'
