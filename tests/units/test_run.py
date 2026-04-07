@@ -1724,6 +1724,7 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
             raise RuntimeError(error_message)
 
         start = time.perf_counter()
+        exception_raised = False
         try:
             result = run(
                 sys.executable,
@@ -1734,35 +1735,26 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
                 **{callback_kwarg: callback},
             )
         except (RuntimeError, TimeoutCancellationError) as error:
-            elapsed = time.perf_counter() - start
-
-            assert elapsed < _PROMPT_EXCEPTION_SECONDS
             result = cast(Any, error).result
+            exception_raised = True
 
-            assert isinstance(result, SubprocessResult)
-            if expected_stdout is str:
-                assert isinstance(result.stdout, str)
-            else:
-                assert result.stdout in expected_stdout
-            if expected_stderr is str:
-                assert isinstance(result.stderr, str)
-            else:
-                assert result.stderr in expected_stderr
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < _PROMPT_EXCEPTION_SECONDS
+        assert isinstance(result, SubprocessResult)
+        if expected_stdout is str:
+            assert isinstance(result.stdout, str)
+        else:
+            assert result.stdout in expected_stdout
+        if expected_stderr is str:
+            assert isinstance(result.stderr, str)
+        else:
+            assert result.stderr in expected_stderr
+
+        if exception_raised:
             returncodes.append(result.returncode)
             killed_flags.append(result.killed_by_token)
         else:
-            elapsed = time.perf_counter() - start
-
-            assert elapsed < _PROMPT_EXCEPTION_SECONDS
-            assert isinstance(result, SubprocessResult)
-            if expected_stdout is str:
-                assert isinstance(result.stdout, str)
-            else:
-                assert result.stdout in expected_stdout
-            if expected_stderr is str:
-                assert isinstance(result.stderr, str)
-            else:
-                assert result.stderr in expected_stderr
             assert result.returncode == 0
             assert result.killed_by_token is False
             successful_results.append(result)
