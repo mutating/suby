@@ -575,6 +575,30 @@ def test_wait_for_process_exit_and_signal_populates_missing_returncode_after_eve
     assert state.wake_event.is_set() is True
 
 
+def test_wait_for_process_exit_and_signal_ignores_oserror_from_final_wait():
+    """If the final returncode-populating wait() raises OSError, wait_for_process_exit_and_signal() still wakes the main loop."""
+    class ProcessWithFailingFinalWait:
+        def __init__(self):
+            self.returncode = None
+            self.wait_calls = 0
+
+        def wait(self):
+            self.wait_calls += 1
+            raise OSError('mocked final wait failure')
+
+    process = ProcessWithFailingFinalWait()
+    state = _run_module._ExecutionState()
+
+    with patch.object(_run_module, 'wait_for_process_exit') as mock_wait_for_exit:
+        _run_module.wait_for_process_exit_and_signal(process, state)  # type: ignore[arg-type]
+
+    mock_wait_for_exit.assert_called_once_with(process, None)
+    assert process.wait_calls == 1
+    assert process.returncode is None
+    assert state.process_exit_event.is_set() is True
+    assert state.wake_event.is_set() is True
+
+
 def test_run_uses_timeout_thread_only_on_event_driven_platforms():
     """Timeout-only run() starts run_timeout_thread only when OS-notification waiting is available, not on fallback platforms."""
     with patch.object(_run_module, 'run_timeout_thread', wraps=_run_module.run_timeout_thread) as mock_timeout_thread:
