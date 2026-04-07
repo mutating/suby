@@ -49,7 +49,6 @@ jobs:
       shell: bash
       run: >-
         mypy
-        --python-version 3.8
         --show-error-codes
         --strict
         --disallow-any-decorated
