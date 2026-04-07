@@ -51,7 +51,6 @@ packages = { find = { include = ["suby"] } }
 paths_to_mutate=["suby"]
 
 [tool.coverage.run]
-branch = "${SUBY_COVERAGE_BRANCH-false}"
 omit = ["*tests*"]
 parallel = true
 plugins = ["coverage_pyver_pragma"]
