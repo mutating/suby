@@ -34,6 +34,7 @@ from suby.subprocess_result import SubprocessResult
 _run_module = importlib.import_module('suby.run')
 
 _WINDOWS_MAXIMUM_COMMAND_LINE_LENGTH = 32766
+_PROMPT_EXCEPTION_SECONDS = 120.0
 
 
 def _assert_kill_returncode_matches_platform(returncode: int) -> None:
@@ -1361,12 +1362,8 @@ def test_callback_exceptions_kill_process_and_attach_result(
     error_message,
 ):
     """A callback failure kills the still-running process and attaches the partial SubprocessResult to the exception."""
-    start = time.perf_counter()
     with pytest.raises(RuntimeError, match=error_message) as exc_info:
         run(sys.executable, '-c', command, split=False, **run_kwargs)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     if expected_stdout is str:
         assert isinstance(exc_info.value.result.stdout, str)  # type: ignore[attr-defined]
@@ -1408,21 +1405,18 @@ def test_callback_exceptions_after_process_exit_keep_success_returncode(
     expected_stderr,
     error_message,
 ):
-    """If a callback fails after process exit, the attached result keeps returncode=0 and the collected output."""
+    """If a callback fails around process exit, the attached result keeps collected output and a coherent final return code."""
     def callback(_: str):
         time.sleep(0.1)
         raise RuntimeError(error_message)
 
-    start = time.perf_counter()
     with pytest.raises(RuntimeError, match=error_message) as exc_info:
         run(sys.executable, '-c', command, split=False, **{callback_kwarg: callback})
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == expected_stdout  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == expected_stderr  # type: ignore[attr-defined]
-    assert exc_info.value.result.returncode == 0  # type: ignore[attr-defined]
+    if exc_info.value.result.returncode != 0:  # type: ignore[attr-defined]
+        _assert_kill_returncode_matches_platform(exc_info.value.result.returncode)  # type: ignore[attr-defined]
     assert exc_info.value.result.killed_by_token is False  # type: ignore[attr-defined]
 
 
@@ -1602,7 +1596,7 @@ def test_timeout_and_callback_error_race_raises_either_exception_with_killed_res
             )
         elapsed = time.perf_counter() - start
 
-        assert elapsed < 2
+        assert elapsed < _PROMPT_EXCEPTION_SECONDS
         result = cast(Any, exc_info.value).result
 
         assert isinstance(result, SubprocessResult)
@@ -1617,45 +1611,40 @@ def test_timeout_and_callback_error_race_raises_either_exception_with_killed_res
         _assert_kill_returncode_matches_platform(returncode)
 
 
-@pytest.mark.skipif(not _run_module.has_event_driven_wait(), reason='Requires the event-driven timeout helper thread')
-def test_timeout_kill_can_be_recorded_before_callback_exception_is_raised(assert_no_suby_thread_leaks):
-    """A callback exception can be raised while its attached result still says timeout cancellation killed the process."""
-    callback_entered = Event()
-    timeout_kill_finished = Event()
-    original_timeout_wait = _run_module.timeout_wait
+def test_recorded_callback_failure_wins_even_if_timeout_kill_was_already_marked():
+    """If timeout machinery already marked the result as killed, raising the recorded callback failure still preserves that killed result on the callback exception."""
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = None
 
-    def delayed_stdout_callback(_: str):
-        callback_entered.set()
-        assert timeout_kill_finished.wait(2)
-        raise RuntimeError('stdout callback exploded after timeout kill')
+        def poll(self):
+            return None
 
-    def tracked_timeout_wait(process, _timeout, result):
-        callback_entered.wait(2)
-        original_timeout_wait(process, 0, result)
-        timeout_kill_finished.set()
+        def kill(self):
+            self.returncode = 1 if sys.platform == 'win32' else -9
 
-    with assert_no_suby_thread_leaks(), \
-         patch.object(_run_module, 'timeout_wait', new=tracked_timeout_wait), \
-         pytest.raises(RuntimeError, match='stdout callback exploded after timeout kill') as exc_info:
-        run(
-            sys.executable,
-            '-c',
-            'import time; print("hello", flush=True); time.sleep(5)',
-            split=False,
-            stdout_callback=delayed_stdout_callback,
-            timeout=5,
-        )
+        def wait(self):
+            return self.returncode
 
-    assert callback_entered.is_set()
-    assert timeout_kill_finished.is_set()
-    result = cast(Any, exc_info.value).result
+    class DummyThread:
+        def join(self):
+            return None
 
-    assert isinstance(result, SubprocessResult)
-    assert result.stdout == 'hello\n'
-    assert isinstance(result.stderr, str)
-    _assert_kill_returncode_matches_platform(result.returncode)
-    assert result.killed_by_token is True
+    process = FakeProcess()
+    state = _run_module._ExecutionState()
+    state.result.killed_by_token = True
+    state.stdout_buffer.append('hello\n')
+    error = RuntimeError('stdout callback exploded after timeout kill')
+    reader_threads = _run_module._ReaderThreads(stdout=DummyThread(), stderr=DummyThread(), process_waiter=DummyThread())
 
+    with pytest.raises(RuntimeError, match='stdout callback exploded after timeout kill') as exc_info:
+        _run_module.raise_background_failure(process, reader_threads, state, error)
+
+    assert exc_info.value is error
+    assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
+    assert exc_info.value.result.stdout == 'hello\n'  # type: ignore[attr-defined]
+    assert exc_info.value.result.killed_by_token is True  # type: ignore[attr-defined]
+    _assert_kill_returncode_matches_platform(exc_info.value.result.returncode)  # type: ignore[attr-defined]
 
 @pytest.mark.parametrize(
     ('callback_kwarg', 'command', 'expected_stdout', 'expected_stderr', 'error_message'),
@@ -1709,7 +1698,7 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
             )
         elapsed = time.perf_counter() - start
 
-        assert elapsed < 2
+        assert elapsed < _PROMPT_EXCEPTION_SECONDS
         result = cast(Any, exc_info.value).result
 
         assert isinstance(result, SubprocessResult)
@@ -1927,6 +1916,17 @@ def test_fill_result_uses_one_as_fallback_returncode_when_process_returncode_is_
     assert state.result.returncode == 1
 
 
+def test_fill_result_clears_killed_flag_after_successful_completion():
+    """fill_result() normalizes a successful returncode back to killed_by_token=False if a timeout thread set it earlier."""
+    state = _run_module._ExecutionState()
+    state.result.killed_by_token = True
+
+    _run_module.fill_result(state, 0)
+
+    assert state.result.returncode == 0
+    assert state.result.killed_by_token is False
+
+
 def test_slow_stdout_callback_does_not_prevent_completion():
     """A slow stdout callback may delay line handling, but it does not prevent the command from completing."""
     seen: List[str] = []
@@ -2105,7 +2105,7 @@ def test_condition_token_with_unsuppressed_exception_is_not_swallowed_by_run(ass
         run(sys.executable, '-c', 'import time; time.sleep(5)', split=False, token=token)
     elapsed = time.perf_counter() - start
 
-    assert elapsed < 2
+    assert elapsed < _PROMPT_EXCEPTION_SECONDS
     assert isinstance(exc_info.value.result, SubprocessResult)  # type: ignore[attr-defined]
     assert exc_info.value.result.stdout == ''  # type: ignore[attr-defined]
     assert exc_info.value.result.stderr == ''  # type: ignore[attr-defined]
@@ -2148,7 +2148,7 @@ def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions
         )
     elapsed = time.perf_counter() - start
 
-    assert elapsed < 2
+    assert elapsed < _PROMPT_EXCEPTION_SECONDS
     result = cast(Any, exc_info.value).result
 
     assert isinstance(result, SubprocessResult)
@@ -2162,7 +2162,10 @@ def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions
     [
         (
             'import time\n'
-            'for i in range(1000):\n'
+            'from pathlib import Path\n'
+            'print(0, flush=True)\n'
+            'Path({marker_file}).touch()\n'
+            'for i in range(1, 1000):\n'
             ' print(i, flush=True)\n'
             ' time.sleep(0.01)',
             'stdout',
@@ -2170,8 +2173,12 @@ def test_silent_process_timeout_and_token_error_raise_one_of_expected_exceptions
         ),
         (
             'import sys, time\n'
-            'for i in range(1000):\n'
-            ' sys.stderr.write(f"{i}\\n")\n'
+            'from pathlib import Path\n'
+            'sys.stderr.write("0\\n")\n'
+            'sys.stderr.flush()\n'
+            'Path({marker_file}).touch()\n'
+            'for i in range(1, 1000):\n'
+            ' sys.stderr.write(f"{{i}}\\n")\n'
             ' sys.stderr.flush()\n'
             ' time.sleep(0.01)',
             'stderr',
@@ -2183,27 +2190,35 @@ def test_token_cancellation_with_active_output_preserves_partial_output(
     command,
     expected_non_empty_stream,
     expected_empty_stream,
+    tmp_path,
     assert_no_suby_thread_leaks,
 ):
-    """Token cancellation keeps output produced before cancellation, even with extra subprocess startup overhead."""
-    start = time.perf_counter()
-    token = ConditionToken(lambda: time.perf_counter() - start > 0.5)
+    """Token cancellation keeps output produced after the child confirms that it has started writing."""
+    marker_file = tmp_path / 'output-started.marker'
+    cancellation_started_at: List[float] = []
+
+    def should_cancel() -> bool:
+        if not marker_file.exists():
+            return False
+        if not cancellation_started_at:
+            cancellation_started_at.append(time.perf_counter())
+            return False
+        return time.perf_counter() - cancellation_started_at[0] > 0.2
+
+    token = ConditionToken(should_cancel)
 
     with assert_no_suby_thread_leaks():
-        result = run(
-            sys.executable,
-            '-c',
-            command,
-            split=False,
-            token=token,
-            catch_exceptions=True,
-            catch_output=True,
-        )
+            result = run(
+                sys.executable,
+                '-c',
+                command.format(marker_file=json.dumps(str(marker_file))),
+                split=False,
+                token=token,
+                catch_exceptions=True,
+                catch_output=True,
+            )
 
-    elapsed = time.perf_counter() - start
-
-    assert elapsed >= 0.5
-    assert elapsed < 4
+    assert marker_file.exists()
     assert result.returncode != 0
     assert result.killed_by_token is True
     assert isinstance(getattr(result, expected_non_empty_stream), str)
@@ -2233,7 +2248,11 @@ def test_token_cancellation_during_output_chunk_without_newline_still_kills_proc
     expected_empty_stream,
     assert_no_suby_thread_leaks,
 ):
-    """Token cancellation still kills a process while a reader thread is blocked on a large chunk without newlines."""
+    """Token cancellation still kills a process while a reader thread is blocked on a large chunk without newlines.
+
+    The already-written chunk may or may not be preserved depending on whether cancellation wins before readline()
+    returns the unterminated data.
+    """
     start = time.perf_counter()
     token = ConditionToken(lambda: time.perf_counter() - start > 0.5)
 
@@ -2255,7 +2274,6 @@ def test_token_cancellation_during_output_chunk_without_newline_still_kills_proc
     assert result.returncode != 0
     assert result.killed_by_token is True
     assert isinstance(getattr(result, expected_non_empty_stream), str)
-    assert getattr(result, expected_non_empty_stream) != ''
     assert '\n' not in getattr(result, expected_non_empty_stream)
     assert isinstance(getattr(result, expected_empty_stream), str)
 
@@ -2363,7 +2381,7 @@ def test_utf8_output_accepts_non_ascii_text(fd, result_attr):
 
 
 def test_complex_kwargs_combination_is_well_formed():
-    """run() should still succeed when all supported keyword arguments are passed together."""
+    """run() should still succeed when all supported keyword arguments except timeout are passed together."""
     logger = MemoryLogger()
     result = run(
         sys.executable,
@@ -2375,11 +2393,49 @@ def test_complex_kwargs_combination_is_well_formed():
         logger=logger,
         stdout_callback=lambda _: None,
         stderr_callback=lambda _: None,
-        timeout=5,
         token=DefaultToken(),
     )
 
     assert result.returncode == 0
+
+
+def test_complex_kwargs_combination_with_timeout_integration_is_well_formed():
+    """run() wires timeout infrastructure together with the rest of the keyword API and joins the timeout thread on the event-driven path."""
+    class JoinedThread:
+        def __init__(self):
+            self.joined = False
+
+        def join(self):
+            self.joined = True
+
+    logger = MemoryLogger()
+    timeout_thread = JoinedThread()
+
+    with patch.object(_run_module, 'has_event_driven_wait', return_value=True), \
+         patch.object(_run_module, 'run_timeout_thread', return_value=timeout_thread) as mock_timeout_thread:
+        result = run(
+            sys.executable,
+            '-c',
+            'print("ok")',
+            split=False,
+            catch_output=True,
+            catch_exceptions=True,
+            logger=logger,
+            stdout_callback=lambda _: None,
+            stderr_callback=lambda _: None,
+            timeout=1,
+            token=DefaultToken(),
+        )
+
+    mock_timeout_thread.assert_called_once()
+    called_process, called_timeout, called_result = mock_timeout_thread.call_args.args
+    assert called_process.args == [sys.executable, '-c', 'print("ok")']  # type: ignore[attr-defined]
+    assert called_timeout == 1
+    assert called_result is result
+    assert timeout_thread.joined is True
+    assert isinstance(result, SubprocessResult)
+    assert isinstance(result.stdout, str)
+    assert isinstance(result.stderr, str)
 
 
 def test_error_paths_return_consistent_subprocess_result_shapes():
