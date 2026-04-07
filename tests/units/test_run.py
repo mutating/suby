@@ -1709,13 +1709,14 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
     expected_stderr,
     error_message,
 ):
-    """Near process exit, a timeout-versus-callback race still leaves a killed result when timeout cancellation wins.
+    """Near process exit, timeout or callback failure may win, but a clean success is also possible if the process exits first.
 
-    The return code is validated with a platform-specific branch because POSIX and Windows report killed
-    processes differently.
+    When timeout cancellation wins, the return code is validated with a platform-specific branch because POSIX
+    and Windows report killed processes differently.
     """
     returncodes = []
     killed_flags = []
+    successful_results = []
 
     for _ in range(5):
         def callback(_: str):
@@ -1723,8 +1724,8 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
             raise RuntimeError(error_message)
 
         start = time.perf_counter()
-        with pytest.raises((RuntimeError, TimeoutCancellationError)) as exc_info:
-            run(
+        try:
+            result = run(
                 sys.executable,
                 '-c',
                 command,
@@ -1732,26 +1733,44 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
                 timeout=0.02,
                 **{callback_kwarg: callback},
             )
-        elapsed = time.perf_counter() - start
+        except (RuntimeError, TimeoutCancellationError) as error:
+            elapsed = time.perf_counter() - start
 
-        assert elapsed < _PROMPT_EXCEPTION_SECONDS
-        result = cast(Any, exc_info.value).result
+            assert elapsed < _PROMPT_EXCEPTION_SECONDS
+            result = cast(Any, error).result
 
-        assert isinstance(result, SubprocessResult)
-        if expected_stdout is str:
-            assert isinstance(result.stdout, str)
+            assert isinstance(result, SubprocessResult)
+            if expected_stdout is str:
+                assert isinstance(result.stdout, str)
+            else:
+                assert result.stdout in expected_stdout
+            if expected_stderr is str:
+                assert isinstance(result.stderr, str)
+            else:
+                assert result.stderr in expected_stderr
+            returncodes.append(result.returncode)
+            killed_flags.append(result.killed_by_token)
         else:
-            assert result.stdout in expected_stdout
-        if expected_stderr is str:
-            assert isinstance(result.stderr, str)
-        else:
-            assert result.stderr in expected_stderr
-        returncodes.append(result.returncode)
-        killed_flags.append(result.killed_by_token)
+            elapsed = time.perf_counter() - start
+
+            assert elapsed < _PROMPT_EXCEPTION_SECONDS
+            assert isinstance(result, SubprocessResult)
+            if expected_stdout is str:
+                assert isinstance(result.stdout, str)
+            else:
+                assert result.stdout in expected_stdout
+            if expected_stderr is str:
+                assert isinstance(result.stderr, str)
+            else:
+                assert result.stderr in expected_stderr
+            assert result.returncode == 0
+            assert result.killed_by_token is False
+            successful_results.append(result)
 
     for returncode in returncodes:
         _assert_kill_returncode_matches_platform(returncode)
-    assert killed_flags == [True, True, True, True, True]
+    assert killed_flags == [True] * len(returncodes)
+    assert len(returncodes) + len(successful_results) == 5
 
 
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten():
