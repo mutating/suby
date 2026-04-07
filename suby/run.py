@@ -298,6 +298,8 @@ def read_stream(  # noqa: PLR0913
             line = stream.readline()
             if not line:
                 return
+            if state.failure_state.error is not None:
+                return
             buffer.append(line)
             if not catch_output:
                 callback(line)
@@ -309,6 +311,11 @@ def read_stream(  # noqa: PLR0913
 
 def wait_for_process_exit_and_signal(process: Popen[str], state: _ExecutionState) -> None:
     wait_for_process_exit(process, None)
+    if process.returncode is None:
+        try:
+            process.wait()
+        except OSError:
+            pass
     state.process_exit_event.set()
     state.wake_event.set()
 
@@ -317,6 +324,8 @@ def fill_result(state: _ExecutionState, returncode: Optional[int]) -> None:
     state.result.stdout = ''.join(state.stdout_buffer)
     state.result.stderr = ''.join(state.stderr_buffer)
     state.result.returncode = 1 if returncode is None else returncode
+    if state.result.returncode == 0:
+        state.result.killed_by_token = False
 
 
 def fill_startup_failure_result(result: SubprocessResult, _error: OSError) -> None:
