@@ -1562,14 +1562,21 @@ def test_read_stream_ignores_line_if_failure_was_already_recorded_after_readline
         def kill(self):
             return None
 
+    class StreamThatRecordsFailureBeforeReturningLine:
+        def __init__(self, state):
+            self._state = state
+
+        def readline(self):
+            self._state.failure_state.set(RuntimeError('already recorded elsewhere'))
+            return 'late-line\n'
+
     state = _run_module._ExecutionState()
-    state.failure_state.set(RuntimeError('already recorded elsewhere'))
     buffer: List[str] = []
     seen: List[str] = []
 
     _run_module.read_stream(
         FakeProcess(),
-        StringIO('late-line\n'),
+        StreamThatRecordsFailureBeforeReturningLine(state),
         buffer,
         False,
         seen.append,
