@@ -43,8 +43,9 @@ keywords = [
     'execute commands',
 ]
 
-[tool.setuptools.package-data]
-"suby" = ["py.typed"]
+[tool.setuptools]
+package-data = { suby = ["py.typed"] }
+packages = { find = { include = ["suby"] } }
 
 [tool.mutmut]
 paths_to_mutate=["suby"]
@@ -57,7 +58,7 @@ plugins = ["coverage_pyver_pragma"]
 source = ["suby"]
 
 [tool.pytest.ini_options]
-norecursedirs = ["mutants"]
+norecursedirs = ["build", "mutants"]
 
 [tool.ruff]
 lint.ignore = ['E501', 'E712', 'PTH123', 'PTH118', 'PLR2004', 'PTH107', 'SIM105', 'SIM102', 'RET503', 'PLR0912', 'C901', 'E731', 'F821']
