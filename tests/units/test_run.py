@@ -1095,6 +1095,7 @@ def test_too_long_command_string_is_normalized_on_windows():
         ('print("x" * {payload_size})', 'stdout', 'x' * 100_000 + '\n'),
         ('import sys; sys.stderr.write("x" * {payload_size})', 'stderr', 'x' * 100_000),
     ],
+    ids=['stdout payload', 'stderr payload'],
 )
 def test_very_large_output_is_handled_without_a_huge_command_line(command, result_attr, expected_output):
     """A very large stdout or stderr payload is captured even when the command line itself stays short."""
