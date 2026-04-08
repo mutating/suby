@@ -2434,7 +2434,7 @@ def test_utf8_output_accepts_non_ascii_text(fd, result_attr):
     result = run(
         sys.executable,
         '-c',
-        f'import os; os.write({fd}, "привет\\n".encode("utf-8"))',
+        f'import os; os.write({fd}, "\\u043f\\u0440\\u0438\\u0432\\u0435\\u0442\\n".encode("utf-8"))',
         split=False,
         catch_output=True,
     )
