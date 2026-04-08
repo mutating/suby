@@ -38,7 +38,7 @@ jobs:
     - name: Install dependencies (pip)
       if: startsWith(matrix.python-version, 'pypy')
       shell: bash
-      run: pip install -r requirements_dev.txt
+      run: pip install --ignore-installed greenlet && pip install -r requirements_dev.txt
 
     - name: Install the library (uv)
       if: "!startsWith(matrix.python-version, 'pypy')"
