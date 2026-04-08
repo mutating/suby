@@ -25,6 +25,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - Ability to specify your callbacks to catch `stdout` and `stderr`.
 - Support for [cancellation tokens](https://github.com/pomponchik/cantok).
 - Ability to set timeouts for subprocesses.
+- Efficient event-driven process waiting using `pidfd` (Linux) and `kqueue` (macOS).
 - Logging of command execution.
 
 
@@ -81,34 +82,29 @@ It returns an object of the `SubprocessResult` class, which contains the followi
 
 - **id**: a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout**: a string containing the entire output of the command being run.
-- **stderr**: a string containing the entire stderr output of the command being run.
+- **stderr**: a string containing the entire stderr output of the command being run. If the subprocess fails to start at all, this field remains empty because no process stderr existed yet.
 - **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
 - **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
 
 ## Command parsing
 
-Each command you use to call `suby` is passed to a special [system call](https://en.wikipedia.org/wiki/System_call), which depends on the operating system. But regardless of the specific operating system, this system call accepts not a single line of input, but a list of substrings. This means that under the hood, `suby` splits the string you pass using [shlex](https://docs.python.org/3/library/shlex.html) on all platforms.
+`suby` always builds an argument list for `subprocess`. By default, every string positional argument is split with [shlex](https://docs.python.org/3/library/shlex.html), and the resulting parts are concatenated.
 
-For example, the following line:
+The contract is:
 
-```bash
-python -c "print('hello, world!')"
-```
+- `str`: split with `shlex`
+- `Path`: converted to `str` without splitting
+- `split=False`: disable splitting for all string arguments
 
-... should be written like this:
+Examples:
 
 ```python
 run('python -c "print(\'hello, world!\')"')
-```
-
-You can pass multiple strings as positional arguments. Each string is split independently and the results are concatenated:
-
-```python
 run('python', '-c "print(777)"')
 ```
 
-You can also pass [`pathlib.Path`](https://docs.python.org/3/library/pathlib.html#pathlib.Path) objects as positional arguments. They are converted to strings automatically and are not subject to splitting:
+`Path` arguments are passed through unchanged except for string conversion:
 
 ```python
 import sys
@@ -117,13 +113,11 @@ from pathlib import Path
 run(Path(sys.executable), '-c print(777)')
 ```
 
-To disable automatic string splitting, pass `split=False`:
+If you pass `split=False`, you must provide arguments in their final form:
 
 ```python
 run('python', '-c', 'print(777)', split=False)
 ```
-
-In this case, you will have to split the command yourself. You can still pass multiple strings — they will be used as-is without any splitting.
 
 
 ### Backslashes on Windows
@@ -148,7 +142,7 @@ Note that this only affects string arguments that go through `shlex` splitting. 
 
 ## Output
 
-By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output is flushed each time a full line is read. For continuous reading from `stderr`, a separate thread is created so that `stdout` and `stderr` are read independently.
+By default, the `stdout` and `stderr` of the subprocess are forwarded to the `stdout` and `stderr` of the current process. Reading from the subprocess is continuous, and output is flushed each time a full line is read. `suby` reads `stdout` and `stderr` in separate threads so that neither stream blocks the other.
 
 You can override the output functions for `stdout` and `stderr`. To do this, you need to pass functions accepting a string as an argument via the `stdout_callback` and `stderr_callback` parameters, respectively. For example, you can color the output (the code example uses the [`termcolor`](https://github.com/termcolor/termcolor) library):
 
@@ -171,6 +165,13 @@ run('python -c "print(\'hello, world!\')"', catch_output=True)
 ```
 
 If you specify `catch_output=True`, even if you have also defined custom callback functions, they will not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the buffering of output.
+
+<details>
+  <summary>Notes about concurrent output</summary>
+
+When the subprocess is canceled or interrupted because a callback raises an exception, the collected `stdout` and `stderr` may contain only the output that was read before termination. If both streams are active at the same time, some trailing output may or may not be captured depending on timing.
+
+</details>
 
 
 ## Logging
@@ -205,10 +206,12 @@ If you don't need these details, simply omit the logger argument.
 
 If you still prefer logging, you can use any object that implements the [logger protocol](https://github.com/pomponchik/emptylog?tab=readme-ov-file#universal-logger-protocol) from the [`emptylog`](https://github.com/pomponchik/emptylog) library, including ones from third-party libraries.
 
+If the subprocess cannot be started at all, `suby` logs a startup-specific message via `logger.exception(...)`. For example, a missing executable is logged as `The executable for the command "definitely_missing_command" was not found.`. Permission and other operating-system startup failures have dedicated startup messages too.
+
 
 ## Exceptions
 
-By default, `suby` raises exceptions in three cases:
+By default, `suby` raises exceptions in four cases:
 
 1. If the command exits with a return code not equal to `0`. In this case, a `RunningCommandError` exception will be raised:
 
@@ -222,9 +225,25 @@ except RunningCommandError as e:
     # > Error when executing the command "python -c 1/0".
 ```
 
-2. If you pass a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token is canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This feature](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
+2. If the subprocess cannot be started, `suby` raises `RunningCommandError` with a startup-specific message and chains the original `OSError` as `__cause__`. In this case, the attached `result.stdout` and `result.stderr` stay empty because the process never started:
 
-3. If a [timeout](#timeouts) you set for the operation expires.
+```python
+from suby import run, RunningCommandError
+
+try:
+    run('definitely_missing_command')
+except RunningCommandError as e:
+    print(e)
+    # > The executable for the command "definitely_missing_command" was not found.
+    print(type(e.__cause__))
+    # > <class 'FileNotFoundError'>
+    print(e.result.stderr)
+    # >
+```
+
+3. If you pass a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token is canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This feature](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
+
+4. If a [timeout](#timeouts) you set for the operation expires.
 
 You can prevent `suby` from raising these exceptions. To do this, set the `catch_exceptions` parameter to `True`:
 
@@ -245,6 +264,25 @@ except TimeoutCancellationError as e:
     print(e.result)
     # > SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
+
+<details>
+  <summary>Notes about callback and token errors</summary>
+
+If a custom `stdout_callback`, `stderr_callback`, or cancellation token raises its own exception, `suby` re-raises that exception and attaches the current `SubprocessResult` to its `result` attribute. The captured output may be partial.
+
+If multiple failures happen concurrently, for example both callbacks raise at nearly the same time, `suby` raises the first one it observes. Which one that is may depend on timing.
+
+If a callback raises after the subprocess has already exited, the exception is still propagated, but the attached `result` may contain a successful `returncode`.
+
+If a timeout and another failure race with each other, the timeout may still win if it expires before a callback failure has been recorded. In that case, `suby` raises `TimeoutCancellationError` and the callback exception may not be observed.
+
+If a token exception has already been recorded before the timeout path wins the race, `suby` keeps propagating that token exception instead.
+
+In timeout-versus-callback races, whether the callback comes from `stdout` or `stderr`, the attached `result.killed_by_token` flag may be either `True` or `False`, depending on whether the timeout path marked the result before the callback failure path was handled.
+
+If a timeout and a callback error happen almost at the same time, the exception you catch and the attached `result` may describe different parts of that race. For example, `suby` may re-raise the callback exception, but the attached `result` may still show that the subprocess was stopped by the timeout. This depends on timing.
+
+</details>
 
 
 ## Working with Cancellation Tokens
@@ -272,16 +310,18 @@ print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exce
 # > SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-Under the hood, a separate thread is created to track the status of the token. When the token is canceled, the thread kills the subprocess.
+Under the hood, token state is checked while `stdout` and `stderr` are being read. When the token is canceled, the subprocess is killed.
 
 ## Timeouts
 
-You can set a timeout for `suby`. It must be a number greater than zero, which specifies the maximum number of seconds the subprocess is allowed to run. If the timeout expires before the subprocess completes, an exception will be raised:
+You can set a timeout for `suby`. It must be a number greater than or equal to zero, which specifies the maximum number of seconds the subprocess is allowed to run. If the timeout expires before the subprocess completes, an exception will be raised:
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
 # > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
 ```
+
+A timeout of `0` is valid and means that the subprocess will be canceled immediately if it has not already exited.
 
 Under the hood, `run` uses [`TimeoutToken`](https://cantok.readthedocs.io/en/latest/types_of_tokens/TimeoutToken/) from the [`cantok`](https://github.com/pomponchik/cantok) library to track the timeout.
 

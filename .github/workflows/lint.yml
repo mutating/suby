@@ -3,10 +3,15 @@ name: Lint
 on:
   push
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', '3.15.0-alpha.1']
@@ -19,13 +24,18 @@ jobs:
       with:
           python-version: ${{ matrix.python-version }}
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
     - name: Install dependencies
       shell: bash
-      run: pip install -r requirements_dev.txt
+      run: uv pip install --system -r requirements_dev.txt
 
     - name: Install the library
       shell: bash
-      run: pip install .
+      run: uv pip install --system .
 
     - name: Run ruff
       shell: bash
@@ -37,8 +47,19 @@ jobs:
 
     - name: Run mypy
       shell: bash
-      run: mypy --strict suby
+      run: >-
+        mypy
+        --show-error-codes
+        --strict
+        --disallow-any-decorated
+        --disallow-any-explicit
+        --disallow-any-expr
+        --disallow-any-generics
+        --disallow-any-unimported
+        --disallow-subclassing-any
+        --warn-return-any
+        suby
 
     - name: Run mypy for tests
       shell: bash
-      run: mypy tests
+      run: mypy --exclude '^tests/typing/' tests

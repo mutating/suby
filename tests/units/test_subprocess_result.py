@@ -1,23 +1,31 @@
 import re
+import sys
 
+from suby import run
 from suby.subprocess_result import SubprocessResult
 
 
-def test_auto_id():
-    assert SubprocessResult().id != SubprocessResult().id
-    assert isinstance(SubprocessResult().id, str)
-    assert len(SubprocessResult().id) > 10
+def test_generated_id_has_expected_shape_and_is_unique():
+    """Each SubprocessResult gets a unique 32-character lowercase hex identifier without dashes."""
+    first_id = SubprocessResult().id
+    second_id = SubprocessResult().id
+
+    assert first_id != second_id
+    assert isinstance(first_id, str)
+    assert len(first_id) == 32
+    assert '-' not in first_id
 
 
-def test_id_has_no_dashes():
-    assert '-' not in SubprocessResult().id
+def test_same_command_run_results_have_distinct_ids():
+    """Two results produced by the same command still have different ids, so callers can distinguish repeated runs."""
+    first_result = run(sys.executable, '-c', 'pass', split=False)
+    second_result = run(sys.executable, '-c', 'pass', split=False)
 
-
-def test_id_length_is_32():
-    assert len(SubprocessResult().id) == 32
+    assert first_result.id != second_result.id
 
 
 def test_default_values():
+    """A fresh SubprocessResult starts with empty process fields and killed_by_token=False."""
     assert SubprocessResult().stdout is None
     assert SubprocessResult().stderr is None
     assert SubprocessResult().returncode is None
@@ -25,6 +33,7 @@ def test_default_values():
 
 
 def test_repr_format():
+    """repr(SubprocessResult) includes the id and all public result fields in the expected format."""
     result = SubprocessResult()
     result.stdout = 'hello'
     result.stderr = ''

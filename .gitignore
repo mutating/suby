@@ -15,3 +15,8 @@ test.py
 html
 CLAUDE.md
 .claude
+mutants
+planning_features.md
+coverage.xml
+.qwen
+uv.lock

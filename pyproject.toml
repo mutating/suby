@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suby"
-version = "0.0.4"
+version = "0.0.5"
 authors = [
   { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
 ]
@@ -43,12 +43,21 @@ keywords = [
     'execute commands',
 ]
 
-[tool.setuptools.package-data]
-"suby" = ["py.typed"]
+[tool.setuptools]
+package-data = { suby = ["py.typed"] }
+packages = { find = { include = ["suby"] } }
 
 [tool.mutmut]
-paths_to_mutate="suby"
-runner="pytest"
+paths_to_mutate=["suby"]
+
+[tool.coverage.run]
+branch = true
+parallel = true
+plugins = ["coverage_pyver_pragma"]
+source = ["suby"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["build", "mutants"]
 
 [tool.ruff]
 lint.ignore = ['E501', 'E712', 'PTH123', 'PTH118', 'PLR2004', 'PTH107', 'SIM105', 'SIM102', 'RET503', 'PLR0912', 'C901', 'E731', 'F821']
