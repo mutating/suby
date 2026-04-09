@@ -9,16 +9,6 @@ import pytest
 _run_module = importlib.import_module('suby.run')
 
 
-def pytest_configure(config):
-    """Keep coverage enabled for xdist workers, but disable inheritance by child `run(... python -c ...)` subprocesses.
-
-    If this hook is removed, every short-lived Python subprocess spawned by the test suite will inherit
-    `COVERAGE_PROCESS_START`, import coverage from the `.pth` bootstrap, and the parallel coverage run will become
-    significantly slower again.
-    """
-    if hasattr(config, 'workerinput'):
-        os.environ.pop('COVERAGE_PROCESS_START', None)
-
 
 def pytest_ignore_collect(collection_path, config):
     """Skip typing-snippet tests in mutmut's copied test tree, because mutmut is a runtime mutation runner."""
