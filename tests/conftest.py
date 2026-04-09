@@ -9,6 +9,18 @@ import pytest
 _run_module = importlib.import_module('suby.run')
 
 
+def pytest_configure(config):
+    """Prevent child processes spawned by run() from inheriting pytest-cov's subprocess coverage.
+
+    Without this, every short-lived Python subprocess spawned by the test suite inherits COV_CORE_*
+    environment variables, causing pytest-cov's .pth hook to activate coverage in each child process.
+    """
+    if hasattr(config, 'workerinput'):
+        for key in list(os.environ):
+            if key.startswith('COV_CORE_'):
+                os.environ.pop(key)
+
+
 
 def pytest_ignore_collect(collection_path, config):
     """Skip typing-snippet tests in mutmut's copied test tree, because mutmut is a runtime mutation runner."""

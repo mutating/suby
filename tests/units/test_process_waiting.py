@@ -70,6 +70,9 @@ def _load_process_waiting_for_platform(monkeypatch, platform_value, pidfd_open, 
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setattr(sys, 'platform', platform_value)
 
+    fake_implementation = type(sys.implementation)(**{**vars(sys.implementation), 'name': 'cpython'})
+    monkeypatch.setattr(sys, 'implementation', fake_implementation)
+
     if pidfd_open is None:
         monkeypatch.delattr(os, 'pidfd_open', raising=False)
     else:
