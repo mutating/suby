@@ -60,7 +60,20 @@ jobs:
       shell: bash
       run: pip list
 
-    - name: Run tests and show the branch coverage on the command line
+    - name: Run tests and show the branch coverage on the command line (CPython)
+      if: "!startsWith(matrix.python-version, 'pypy')"
+      shell: bash
+      run: |
+        pth_file="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/suby_coverage_process_startup.pth"
+        printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
+        coverage erase
+        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -p no:cov -n auto --cache-clear --assert=plain
+        coverage combine
+        coverage report -m --fail-under=100 --omit='*tests*'
+        coverage xml --omit='*tests*'
+
+    - name: Run tests and show the branch coverage on the command line (PyPy)
+      if: startsWith(matrix.python-version, 'pypy')
       shell: bash
       run: pytest --cov=suby --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=100 -n auto --cache-clear --assert=plain
 

@@ -27,6 +27,7 @@ _run_module = importlib.import_module('suby.run')
 _is_event_driven_platform = has_event_driven_wait()
 _is_macos = sys.platform == 'darwin'
 _is_linux = sys.platform == 'linux'
+_is_pypy = sys.implementation.name == 'pypy'
 _has_pidfd = hasattr(os, 'pidfd_open')
 _COORDINATION_TIMEOUT_SECONDS = 5.0
 
@@ -207,7 +208,7 @@ def test_oserror_fallback_with_reaped_pid():
 @pytest.mark.parametrize(
     'expected',
     [
-        pytest.param(True, marks=pytest.mark.skipif(not _is_macos, reason='macOS only')),
+        pytest.param(True, marks=pytest.mark.skipif(not _is_macos or _is_pypy, reason='macOS CPython only')),
         pytest.param(True, marks=pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')),
         pytest.param(False, marks=pytest.mark.skipif(_is_event_driven_platform, reason='Only for fallback platforms')),
     ],
@@ -315,7 +316,7 @@ def test_concurrent_calls_thread_safety():
 @pytest.mark.parametrize(
     'waiter_name',
     [
-        pytest.param('_wait_kqueue', marks=pytest.mark.skipif(not _is_macos, reason='macOS only')),
+        pytest.param('_wait_kqueue', marks=pytest.mark.skipif(not _is_macos or _is_pypy, reason='macOS CPython only')),
         pytest.param('_wait_pidfd', marks=pytest.mark.skipif(not (_is_linux and _has_pidfd), reason='Linux 3.9+ only')),
     ],
 )
@@ -337,7 +338,7 @@ def test_platform_waiter_directly_returns_without_killing_running_process(waiter
         process.wait()
 
 
-@pytest.mark.skipif(not _is_macos, reason='macOS only')
+@pytest.mark.skipif(not _is_macos or _is_pypy, reason='macOS CPython only')
 def test_macos_wait_for_process_exit_passes_none_to_event_driven_waiter():
     """On macOS, None timeout is forwarded to the event-driven waiter unchanged."""
     process = subprocess.Popen(
@@ -353,7 +354,7 @@ def test_macos_wait_for_process_exit_passes_none_to_event_driven_waiter():
         process.wait()
 
 
-@pytest.mark.skipif(not _is_macos, reason='macOS only')
+@pytest.mark.skipif(not _is_macos or _is_pypy, reason='macOS CPython only')
 def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
     """The macOS kqueue waiter subscribes to the child-process exit event and closes the kqueue handle afterwards."""
     mock_kqueue = MagicMock()
@@ -375,7 +376,7 @@ def test_macos_wait_kqueue_builds_subscription_and_closes_queue():
     mock_kqueue.close.assert_called_once()
 
 
-@pytest.mark.skipif(not _is_macos, reason='macOS only')
+@pytest.mark.skipif(not _is_macos or _is_pypy, reason='macOS CPython only')
 def test_macos_wait_for_process_exit_falls_back_after_kqueue_oserror():
     """If the macOS waiter raises OSError, wait_for_process_exit falls back to process.wait()."""
     process = subprocess.Popen(
