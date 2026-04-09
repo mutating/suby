@@ -10,18 +10,14 @@ _run_module = importlib.import_module('suby.run')
 
 
 def pytest_configure(config):
-    """Prevent child processes spawned by run() from inheriting subprocess coverage hooks.
+    """Keep coverage enabled for xdist workers, but disable inheritance by child `run(... python -c ...)` subprocesses.
 
-    Without this, every short-lived Python subprocess spawned by the test suite inherits coverage
-    environment variables (COVERAGE_PROCESS_START for coverage run, COV_CORE_* for pytest-cov),
-    causing coverage to activate in each child process and slowing the suite significantly.
+    If this hook is removed, every short-lived Python subprocess spawned by the test suite will inherit
+    `COVERAGE_PROCESS_START`, import coverage from the `.pth` bootstrap, and the parallel coverage run will become
+    significantly slower again.
     """
     if hasattr(config, 'workerinput'):
         os.environ.pop('COVERAGE_PROCESS_START', None)
-        for key in list(os.environ):
-            if key.startswith('COV_CORE_'):
-                os.environ.pop(key)
-
 
 
 def pytest_ignore_collect(collection_path, config):

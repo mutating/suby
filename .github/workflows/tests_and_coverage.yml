@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', '3.15.0-alpha.1', 'pypy3.9', 'pypy3.10', 'pypy3.11']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', '3.15.0-alpha.1']
 
     steps:
     - uses: actions/checkout@v4
@@ -25,40 +25,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
     - name: Set up uv
-      if: "!startsWith(matrix.python-version, 'pypy')"
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
 
-    - name: Install dependencies (uv)
-      if: "!startsWith(matrix.python-version, 'pypy')"
+    - name: Install dependencies
       shell: bash
       run: uv pip install --system -r requirements_dev.txt
 
-    - name: Install dependencies (pip)
-      if: startsWith(matrix.python-version, 'pypy')
-      shell: bash
-      run: pip install --ignore-installed -r requirements_dev.txt
-
-    - name: Install the library (uv)
-      if: "!startsWith(matrix.python-version, 'pypy')"
+    - name: Install the library
       shell: bash
       run: uv pip install --system .
 
-    - name: Install the library (pip)
-      if: startsWith(matrix.python-version, 'pypy')
-      shell: bash
-      run: pip install .
-
-    - name: Print all libs (uv)
-      if: "!startsWith(matrix.python-version, 'pypy')"
+    - name: Print all libs
       shell: bash
       run: uv pip list --system
-
-    - name: Print all libs (pip)
-      if: startsWith(matrix.python-version, 'pypy')
-      shell: bash
-      run: pip list
 
     - name: Run tests and show the branch coverage on the command line
       shell: bash
@@ -66,7 +47,7 @@ jobs:
         pth_file="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/suby_coverage_process_startup.pth"
         printf "import os; os.getenv('COVERAGE_PROCESS_START') and __import__('coverage').process_startup()\n" > "$pth_file"
         coverage erase
-        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -p no:cov -n auto --cache-clear --assert=plain
+        COVERAGE_PROCESS_START="$PWD/pyproject.toml" coverage run -m pytest -n auto --cache-clear --assert=plain
         coverage combine
         coverage report -m --fail-under=100 --omit='*tests*'
         coverage xml --omit='*tests*'
