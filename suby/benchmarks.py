@@ -4,6 +4,7 @@ import sys
 from functools import partial
 from pathlib import Path
 
+from cantok import ConditionToken, SimpleToken
 from microbenchmark import Scenario
 
 from suby import run
@@ -11,6 +12,9 @@ from suby import run
 ITERATIONS = 100
 PYTHON = Path(sys.executable)
 run_catching_output = partial(run, catch_output=True)
+run_with_simple_token = partial(run, token=SimpleToken())
+run_with_condition_token = partial(run, token=ConditionToken(lambda: False))
+run_with_cancelled_token = partial(run, token=SimpleToken().cancel(), catch_exceptions=True, catch_output=True)
 
 
 simple_success = Scenario(
@@ -101,6 +105,30 @@ short_sleep = Scenario(
     number=20,
 )
 
+simple_token_success = Scenario(
+    run_with_simple_token,
+    (PYTHON, '-c', 'pass'),
+    name='simple_token_success',
+    doc='Runs a minimal subprocess while checking a non-cancelled SimpleToken.',
+    number=ITERATIONS,
+)
+
+condition_token_success = Scenario(
+    run_with_condition_token,
+    (PYTHON, '-c', 'pass'),
+    name='condition_token_success',
+    doc='Runs a minimal subprocess while polling a ConditionToken that remains active.',
+    number=ITERATIONS,
+)
+
+cancelled_token_before_start = Scenario(
+    run_with_cancelled_token,
+    (PYTHON, '-c "import time; time.sleep(1)"'),
+    name='cancelled_token_before_start',
+    doc='Runs a subprocess with an already-cancelled token and catches the cancellation result.',
+    number=20,
+)
+
 all = (  # noqa: A001
     simple_success
     + python_version_output
@@ -113,4 +141,7 @@ all = (  # noqa: A001
     + many_short_lines
     + moderate_python_work
     + short_sleep
+    + simple_token_success
+    + condition_token_success
+    + cancelled_token_before_start
 )

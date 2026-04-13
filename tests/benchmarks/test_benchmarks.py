@@ -14,6 +14,9 @@ SCENARIOS = [
     benchmarks.many_short_lines,
     benchmarks.moderate_python_work,
     benchmarks.short_sleep,
+    benchmarks.simple_token_success,
+    benchmarks.condition_token_success,
+    benchmarks.cancelled_token_before_start,
 ]
 
 

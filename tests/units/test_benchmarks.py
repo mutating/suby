@@ -17,6 +17,9 @@ SCENARIOS = [
     benchmarks.many_short_lines,
     benchmarks.moderate_python_work,
     benchmarks.short_sleep,
+    benchmarks.simple_token_success,
+    benchmarks.condition_token_success,
+    benchmarks.cancelled_token_before_start,
 ]
 
 OUTPUT_SCENARIOS = [
@@ -58,7 +61,7 @@ def test_benchmark_docs_are_present():
 
 def test_benchmark_iteration_counts():
     for scenario in SCENARIOS:
-        if scenario is benchmarks.short_sleep:
+        if scenario in (benchmarks.short_sleep, benchmarks.cancelled_token_before_start):
             assert scenario.number == 20
         else:
             assert scenario.number == benchmarks.ITERATIONS
@@ -97,4 +100,10 @@ def test_key_benchmark_arguments():
     assert benchmarks.short_sleep._args == [
         benchmarks.PYTHON,
         '-c "import time; time.sleep(0.01)"',
+    ]
+    assert benchmarks.simple_token_success._args == [benchmarks.PYTHON, '-c', 'pass']
+    assert benchmarks.condition_token_success._args == [benchmarks.PYTHON, '-c', 'pass']
+    assert benchmarks.cancelled_token_before_start._args == [
+        benchmarks.PYTHON,
+        '-c "import time; time.sleep(1)"',
     ]
