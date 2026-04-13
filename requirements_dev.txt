@@ -1,5 +1,6 @@
 pytest==8.3.5
-pytest-codspeed==4.3.0
+pytest-codspeed==2.2.1; python_version < '3.9'
+pytest-codspeed==4.3.0; python_version >= '3.9'
 pytest-xdist==3.6.1; python_version < '3.9'
 pytest-xdist==3.8.0; python_version >= '3.9'
 coverage==7.6.1
