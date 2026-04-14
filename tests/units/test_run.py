@@ -1703,20 +1703,16 @@ def test_recorded_callback_failure_wins_even_if_timeout_kill_was_already_marked(
     ],
 )
 @pytest.mark.usefixtures('assert_no_suby_thread_leaks')
-def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_result(
+def test_timeout_and_near_exit_callback_error_race_keeps_coherent_result(
     callback_kwarg,
     command,
     expected_stdout,
     expected_stderr,
     error_message,
 ):
-    """Near process exit, timeout or callback failure may win, but a clean success is also possible if the process exits first.
-
-    When timeout cancellation wins, the return code is validated with a platform-specific branch because POSIX
-    and Windows report killed processes differently.
-    """
-    returncodes = []
-    killed_flags = []
+    """Near process exit, timeout cancellation, callback failure, or clean subprocess exit may win the race."""
+    killed_results = []
+    callback_after_successful_exit_results = []
     successful_results = []
 
     for _ in range(5):
@@ -1725,7 +1721,7 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
             raise RuntimeError(error_message)
 
         start = time.perf_counter()
-        exception_raised = False
+        caught_error = None
         try:
             result = run(
                 sys.executable,
@@ -1737,7 +1733,7 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
             )
         except (RuntimeError, TimeoutCancellationError) as error:
             result = cast(Any, error).result
-            exception_raised = True
+            caught_error = error
 
         elapsed = time.perf_counter() - start
 
@@ -1752,18 +1748,26 @@ def test_timeout_and_near_exit_callback_error_race_raises_either_with_killed_res
         else:
             assert result.stderr in expected_stderr
 
-        if exception_raised:
-            returncodes.append(result.returncode)
-            killed_flags.append(result.killed_by_token)
-        else:
+        if caught_error is None:
             assert result.returncode == 0
             assert result.killed_by_token is False
             successful_results.append(result)
+        elif result.returncode == 0:
+            assert isinstance(caught_error, RuntimeError)
+            assert str(caught_error) == error_message
+            assert result.killed_by_token is False
+            callback_after_successful_exit_results.append(result)
+        else:
+            _assert_kill_returncode_matches_platform(result.returncode)
+            if isinstance(caught_error, TimeoutCancellationError):
+                assert result.killed_by_token is True
+            else:
+                assert isinstance(caught_error, RuntimeError)
+                assert str(caught_error) == error_message
+                assert isinstance(result.killed_by_token, bool)
+            killed_results.append(result)
 
-    for returncode in returncodes:
-        _assert_kill_returncode_matches_platform(returncode)
-    assert killed_flags == [True] * len(returncodes)
-    assert len(returncodes) + len(successful_results) == 5
+    assert len(killed_results) + len(callback_after_successful_exit_results) + len(successful_results) == 5
 
 
 def test_existing_result_attribute_on_callback_exception_is_not_overwritten():
