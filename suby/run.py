@@ -48,7 +48,7 @@ from suby.errors import (
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
-StreamCallback = Callable[[str], Any]
+StreamCallback = Callable[[str], Any]  # type: ignore[misc]
 _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
 _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
     CantokConditionCancellationError: ConditionCancellationError,
