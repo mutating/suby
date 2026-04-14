@@ -291,7 +291,7 @@ def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
             raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error  # pragma: no cover (!Windows)
         raise WrongDirectoryError(f'The directory {raw_text!r} does not exist.') from error
     except NotADirectoryError as error:
-        raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
+        raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error  # pragma: no cover (Windows)
     except PermissionError as error:
         raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.') from error
     except OSError as error:
@@ -300,7 +300,7 @@ def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
     if not stat.S_ISDIR(directory_stat.st_mode):
         raise WrongDirectoryError(f'The path {raw_text!r} exists but is not a directory.')
     if os.name != 'nt' and not os.access(cwd_path, os.X_OK):
-        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.')
+        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.')  # pragma: no cover (Windows)
 
     return str(cwd_path)
 
