@@ -48,7 +48,7 @@ from suby.errors import (
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
-StreamCallback = Callable[[str], Any]  # type: ignore[misc]
+StreamCallback = Callable[[str], Any]  # type: ignore[misc, unused-ignore]
 _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
 _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
     CantokConditionCancellationError: ConditionCancellationError,
@@ -287,6 +287,8 @@ def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
     try:
         directory_stat = cwd_path.stat()
     except FileNotFoundError as error:
+        if has_file_parent(cwd_path):
+            raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
         raise WrongDirectoryError(f'The directory {raw_text!r} does not exist.') from error
     except NotADirectoryError as error:
         raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
@@ -301,6 +303,16 @@ def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
         raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.')
 
     return str(cwd_path)
+
+
+def has_file_parent(path: Path) -> bool:
+    for parent in path.parents:
+        try:
+            parent_stat = parent.stat()
+        except OSError:
+            continue
+        return not stat.S_ISDIR(parent_stat.st_mode)
+    return False
 
 
 def build_subprocess_env(

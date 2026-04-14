@@ -24,6 +24,7 @@ def _child_cwd(**run_kwargs) -> Path:
         'import os; print(os.getcwd())',
         split=False,
         catch_output=True,
+        add_env={'PYTHONIOENCODING': 'utf-8'},
         **run_kwargs,
     )
 
@@ -119,7 +120,15 @@ def test_run_executes_in_relative_directory_values(tmp_path, monkeypatch, direct
     assert child_cwd.resolve() == (call_site / expected_relative).resolve()
 
 
-@pytest.mark.parametrize('name', ['dir with spaces', ' ', '  ', 'директория'])
+@pytest.mark.parametrize(
+    'name',
+    [
+        'dir with spaces',
+        pytest.param(' ', marks=pytest.mark.skipif(os.name == 'nt', reason='Windows path APIs do not preserve space-only directory names')),
+        pytest.param('  ', marks=pytest.mark.skipif(os.name == 'nt', reason='Windows path APIs do not preserve space-only directory names')),
+        'директория',
+    ],
+)
 def test_directory_string_is_not_split_or_normalized(tmp_path, name):
     """Spaces and unicode in directory names are passed as one cwd value."""
     directory = tmp_path / name
