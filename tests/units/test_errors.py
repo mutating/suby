@@ -4,6 +4,7 @@ from suby.errors import (
     EnvironmentVariablesConflict,
     RunningCommandError,
     WrongCommandError,
+    WrongDirectoryError,
 )
 from suby.subprocess_result import SubprocessResult
 
@@ -31,4 +32,13 @@ def test_environment_variables_conflict_is_value_error_without_result():
 
     assert isinstance(error, ValueError)
     assert str(error) == 'test message'
+    assert not hasattr(error, 'result')
+
+
+def test_wrong_directory_error_is_value_error_without_result():
+    """WrongDirectoryError is a pre-start validation error and does not carry a SubprocessResult."""
+    error = WrongDirectoryError('bad directory')
+
+    assert isinstance(error, ValueError)
+    assert str(error) == 'bad directory'
     assert not hasattr(error, 'result')

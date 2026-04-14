@@ -24,3 +24,7 @@ class TimeoutCancellationError(CantokTimeoutCancellationError):
 
 class WrongCommandError(Exception):
     ...
+
+
+class WrongDirectoryError(ValueError):
+    ...

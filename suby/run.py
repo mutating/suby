@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Mapping as RuntimeMapping
 from dataclasses import dataclass, field
 from math import isfinite
@@ -42,11 +43,12 @@ from suby.errors import (
     RunningCommandError,
     TimeoutCancellationError,
     WrongCommandError,
+    WrongDirectoryError,
 )
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
-StreamCallback = Callable[[str], Any]  # type: ignore[misc]
+StreamCallback = Callable[[str], Any]
 _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
 _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
     CantokConditionCancellationError: ConditionCancellationError,
@@ -62,6 +64,7 @@ class _TextPopenKwargs(TypedDict, total=False):
     encoding: str
     errors: str
     env: Mapping[str, str]
+    cwd: str
 
 
 class _FailureState:
@@ -102,6 +105,7 @@ def run(  # noqa: PLR0913, PLR0915
     stdout_callback: StreamCallback = stdout_with_flush,
     stderr_callback: StreamCallback = stderr_with_flush,
     timeout: Optional[Union[int, float]] = None,
+    directory: Optional[Union[str, Path]] = None,
     split: bool = True,
     double_backslash: bool = system() == 'Windows',
     env: Optional[Mapping[str, str]] = None,
@@ -125,6 +129,7 @@ def run(  # noqa: PLR0913, PLR0915
         raise WrongCommandError('You must pass at least one positional argument with the command to run.')
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
     subprocess_env = build_subprocess_env(env, add_env, delete_env)
+    subprocess_directory = prepare_directory(directory)
     popen_kwargs: _TextPopenKwargs = {
         'stdout': PIPE,
         'stderr': PIPE,
@@ -135,6 +140,8 @@ def run(  # noqa: PLR0913, PLR0915
     }
     if subprocess_env is not None:
         popen_kwargs['env'] = subprocess_env
+    if subprocess_directory is not None:
+        popen_kwargs['cwd'] = subprocess_directory
 
     state = _ExecutionState()
 
@@ -249,6 +256,51 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     if double_backslash:
         argument = argument.replace('\\', '\\\\')
     return shlex_split(argument)
+
+
+def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
+    if directory is None:
+        return None
+
+    if isinstance(directory, str):
+        raw_text = directory
+    elif isinstance(directory, Path):
+        raw_text = str(directory)
+    else:
+        raise TypeError(f'directory must be a string or pathlib.Path object, got {directory!r} ({type(directory).__name__}).')
+
+    if raw_text == '':
+        raise WrongDirectoryError('directory must not be an empty string; use "." for the current directory.')
+    if '\x00' in raw_text:
+        raise WrongDirectoryError(f'directory must not contain null bytes, got {raw_text!r}.')
+
+    path = Path(raw_text)
+    if path.is_absolute():
+        cwd_path = path
+    else:
+        try:
+            current_directory = Path.cwd()
+        except OSError as error:
+            raise WrongDirectoryError(f'Could not determine the current working directory while resolving directory {raw_text!r}.') from error
+        cwd_path = current_directory / path
+
+    try:
+        directory_stat = cwd_path.stat()
+    except FileNotFoundError as error:
+        raise WrongDirectoryError(f'The directory {raw_text!r} does not exist.') from error
+    except NotADirectoryError as error:
+        raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
+    except PermissionError as error:
+        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.') from error
+    except OSError as error:
+        raise WrongDirectoryError(f'Could not access directory {raw_text!r}: {error}.') from error
+
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise WrongDirectoryError(f'The path {raw_text!r} exists but is not a directory.')
+    if os.name != 'nt' and not os.access(cwd_path, os.X_OK):
+        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.')
+
+    return str(cwd_path)
 
 
 def build_subprocess_env(

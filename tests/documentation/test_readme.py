@@ -15,6 +15,7 @@ from suby import (
     EnvironmentVariablesConflict,
     RunningCommandError,
     TimeoutCancellationError,
+    WrongDirectoryError,
     run,
 )
 from suby.subprocess_result import SubprocessResult
@@ -331,3 +332,109 @@ def test_environment_variables_conflict_example():
             env={'SUBY_README_CONFLICT_ENV': 'value'},
             delete_env=['SUBY_README_CONFLICT_ENV'],
         )
+
+
+def test_changing_directories_path_example(tmp_path, monkeypatch):
+    """The README Path example runs the child process in the requested directory."""
+    monkeypatch.chdir(tmp_path)
+    project = Path('project')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=project,
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_relative_example(tmp_path, monkeypatch):
+    """Relative README examples are resolved from the parent cwd at call time."""
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    project = Path('project')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory='./project/',
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_does_not_change_parent_cwd(tmp_path, monkeypatch):
+    """Passing directory changes only the child process cwd, not the current process cwd."""
+    monkeypatch.chdir(tmp_path)
+    Path('project').mkdir(exist_ok=True)
+    parent_before = Path.cwd()
+
+    run(sys.executable, '-c', 'pass', split=False, directory='./project')
+
+    assert Path.cwd() == parent_before
+
+
+def test_changing_directories_path_with_spaces_example(tmp_path, monkeypatch):
+    """Directory paths containing spaces are passed as one path."""
+    monkeypatch.chdir(tmp_path)
+    project = Path('project with spaces')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=project,
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_explicit_home_path_example():
+    """Path.home() is an explicit path and is not shell-style tilde expansion."""
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=Path.home(),
+    )
+
+    assert Path(result.stdout.strip()).resolve() == Path.home().resolve()
+
+
+def test_changing_directories_does_not_expand_tilde(tmp_path, monkeypatch):
+    """The README documents that directory does not perform shell-style tilde expansion."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(WrongDirectoryError, match='does not exist'):
+        run(sys.executable, '-c', 'pass', split=False, directory='~/missing')
+
+
+def test_changing_directories_invalid_directory_is_not_caught_by_catch_exceptions(tmp_path, monkeypatch):
+    """catch_exceptions=True does not suppress invalid directory argument errors."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(WrongDirectoryError) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'pass',
+            split=False,
+            catch_exceptions=True,
+            directory='missing-directory',
+        )
+
+    assert str(exc_info.value) == "The directory 'missing-directory' does not exist."

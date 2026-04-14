@@ -13,10 +13,14 @@ from suby import (
     EnvironmentVariablesConflict,
     RunningCommandError,
     TimeoutCancellationError,
+    WrongDirectoryError,
     run,
 )
 from suby.errors import (
     EnvironmentVariablesConflict as ModuleEnvironmentVariablesConflict,
+)
+from suby.errors import (
+    WrongDirectoryError as ModuleWrongDirectoryError,
 )
 from suby.subprocess_result import SubprocessResult
 
@@ -95,6 +99,34 @@ def test_run_rejects_non_boolean_keyword_flags_and_unknown_kwargs() -> None:
     run('python -c pass', double_backslash='false')  # E: [arg-type]
     run('python -c pass', catchOutput=True)  # E: [call-arg]
     run('python -c pass', cwd='.')  # E: [call-arg]
+
+
+@pytest.mark.mypy_testing
+def test_run_accepts_valid_directory_keyword_arguments() -> None:
+    """directory accepts str, Path, None, and optional str/Path values."""
+    directory_value: Union[str, Path] = Path('.')  # noqa: PTH201
+    maybe_directory: Optional[Union[str, Path]] = Path('.')  # noqa: PTH201
+
+    run('python -c pass', directory='.')
+    run('python -c pass', directory='./dir')
+    run('python -c pass', directory=Path('.'))  # noqa: PTH201
+    run('python -c pass', directory=Path.cwd())
+    run('python -c pass', directory=Path('.').resolve())  # noqa: PTH201
+    run('python -c pass', directory=None)
+    run('python -c pass', directory=directory_value)
+    run('python -c pass', directory=maybe_directory)
+
+    if maybe_directory is not None:
+        run('python -c pass', directory=maybe_directory)
+
+
+@pytest.mark.mypy_testing
+def test_run_rejects_invalid_directory_keyword_arguments() -> None:
+    """directory rejects bytes, non-path objects, and PurePath."""
+    run('python -c pass', directory=b'.')  # E: [arg-type]
+    run('python -c pass', directory=123)  # E: [arg-type]
+    run('python -c pass', directory=PurePath('.'))  # E: [arg-type]  # noqa: PTH201
+    run('python -c pass', directory=object())  # E: [arg-type]
 
 
 @pytest.mark.mypy_testing
@@ -382,6 +414,7 @@ def test_run_accepts_valid_typed_kwargs_unpacking() -> None:
         split: bool
         double_backslash: bool
         timeout: Union[int, float, None]
+        directory: Optional[Union[str, Path]]
         env: Mapping[str, str]
         add_env: Mapping[str, str]
         delete_env: Tuple[str, ...]
@@ -392,6 +425,7 @@ def test_run_accepts_valid_typed_kwargs_unpacking() -> None:
         'split': True,
         'double_backslash': True,
         'timeout': 1,
+        'directory': Path('.'),  # noqa: PTH201
         'env': {'A': '1'},
         'add_env': {'B': '2'},
         'delete_env': ('C',),
@@ -406,13 +440,23 @@ def test_run_rejects_invalid_typed_kwargs_unpacking() -> None:
     class WrongTimeoutKwargs(TypedDict, total=False):
         timeout: str
 
+    class WrongBytesDirectoryKwargs(TypedDict, total=False):
+        directory: bytes
+
+    class WrongPurePathDirectoryKwargs(TypedDict, total=False):
+        directory: PurePath
+
     class UnknownKwargs(TypedDict, total=False):
         cwd: str
 
     wrong_timeout_kwargs: WrongTimeoutKwargs = {'timeout': '1'}
+    wrong_bytes_directory_kwargs: WrongBytesDirectoryKwargs = {'directory': b'.'}
+    wrong_pure_path_directory_kwargs: WrongPurePathDirectoryKwargs = {'directory': PurePath('.')}  # noqa: PTH201
     unknown_kwargs: UnknownKwargs = {'cwd': '.'}
 
     run('python -c pass', **wrong_timeout_kwargs)  # E: [arg-type]
+    run('python -c pass', **wrong_bytes_directory_kwargs)  # E: [arg-type]
+    run('python -c pass', **wrong_pure_path_directory_kwargs)  # E: [arg-type]
     run('python -c pass', **unknown_kwargs)  # E: [misc]
 
 
@@ -461,6 +505,16 @@ def test_environment_variables_conflict_is_importable_and_is_value_error() -> No
     """The environment-conflict exception is exported from both the package root and the errors module."""
     root_error: ValueError = EnvironmentVariablesConflict('conflict')
     module_error: ValueError = ModuleEnvironmentVariablesConflict('conflict')
+
+    raise root_error
+    raise module_error
+
+
+@pytest.mark.mypy_testing
+def test_wrong_directory_error_is_importable_and_is_value_error() -> None:
+    """The directory-validation exception is exported from both the package root and the errors module."""
+    root_error: ValueError = WrongDirectoryError('bad directory')
+    module_error: ValueError = ModuleWrongDirectoryError('bad directory')
 
     raise root_error
     raise module_error
