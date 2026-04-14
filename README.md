@@ -184,6 +184,41 @@ run('python -c pass', directory=Path.home())
 
 > ⚠️ If the directory is “broken” — for example, if it does not exist, or if there is a file at the specified path instead of a directory — a `suby.errors.WrongDirectoryError` exception will be raised. This exception will not be [caught](#exceptions) if `catch_exceptions=True` is used.
 
+Use `env` when the subprocess should receive exactly the variables you provide:
+
+```python
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    env={'MY_VARIABLE': 'hello'},
+)
+#> hello
+```
+
+> ↑ When `env` is provided, variables from the current process are not added automatically. `env={}` means a truly empty environment, which may make some executables fail on platforms that require system variables.
+
+Use `add_env` to start with the current process environment and add or override selected variables:
+
+```python
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    add_env={'MY_VARIABLE': 'hello'},
+)
+#> hello
+```
+
+And use `delete_env` to remove variables from the environment passed to the subprocess:
+
+```python
+# If MY_VARIABLE exists in the current process environment, it will not be passed to this subprocess.
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    delete_env=['MY_VARIABLE'],
+)
+#> None
+```
+
+> ⓘ On `Windows`, environment variable names are handled case-insensitively. On other platforms, names are case-sensitive.
+
 
 ## Output
 
@@ -390,75 +425,3 @@ Just as with [regular cancellation tokens](#working-with-cancellation-tokens), y
 print(run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True))
 #> SubprocessResult(id='ea88c518d25011eeb25e320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
-
-
-## Environment variables
-
-By default, a subprocess receives the same environment variables as the current process:
-
-```python
-run('python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"')
-```
-
-Use `env` when the subprocess should receive exactly the variables you provide:
-
-```python
-run(
-    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
-    env={'MY_VARIABLE': 'hello'},
-)
-#> hello
-```
-
-When `env` is provided, variables from the current process are not added automatically. `env={}` means a truly empty environment, which may make some executables fail on platforms that require system variables.
-
-Use `add_env` to start with the current process environment and add or override selected variables:
-
-```python
-run(
-    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
-    add_env={'MY_VARIABLE': 'hello'},
-)
-#> hello
-```
-
-If both `env` and `add_env` are provided, `add_env` is applied after `env`:
-
-```python
-run(
-    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
-    env={'MY_VARIABLE': 'from env'},
-    add_env={'MY_VARIABLE': 'from add_env'},
-)
-#> from add_env
-```
-
-Use `delete_env` to remove variables from the environment passed to the subprocess:
-
-```python
-# If MY_VARIABLE exists in the current process environment, it will not be
-# passed to this subprocess.
-run(
-    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
-    delete_env=['MY_VARIABLE'],
-)
-#> None
-```
-
-`delete_env` is applied last. A variable cannot be explicitly set through `env` or `add_env` and deleted through `delete_env` in the same call:
-
-```python
-from suby import EnvironmentVariablesConflict
-
-try:
-    run(
-        'python -c pass',
-        env={'MY_VARIABLE': 'hello'},
-        delete_env=['MY_VARIABLE'],
-    )
-except EnvironmentVariablesConflict as error:
-    print(error)
-    #> Environment variables cannot be both set via env/add_env and deleted via delete_env: MY_VARIABLE.
-```
-
-On `Windows`, environment variable names are handled case-insensitively. On other platforms, names are case-sensitive.
