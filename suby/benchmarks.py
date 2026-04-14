@@ -11,6 +11,7 @@ from microbenchmark import Scenario, a
 from suby import run
 
 ITERATIONS = 100
+SHORT_ITERATIONS = 20
 PYTHON = Path(sys.executable)
 
 
@@ -131,7 +132,7 @@ short_sleep = Scenario(
     a(PYTHON, '-c "import time; time.sleep(0.01)"'),
     name='short_sleep',
     doc='Runs a subprocess that stays alive briefly without producing output.',
-    number=20,
+    number=SHORT_ITERATIONS,
 )
 
 simple_token_success = Scenario(
@@ -161,14 +162,14 @@ cancelled_token_before_start = Scenario(
     ),
     name='cancelled_token_before_start',
     doc='Runs a subprocess with an already-cancelled token and catches the cancellation result.',
-    number=20,
+    number=SHORT_ITERATIONS,
 )
 
 condition_token_cancel_after_start = Scenario(
     run_with_delayed_condition_token_cancellation,
     name='condition_token_cancel_after_start',
     doc='Starts a subprocess and cancels it with a ConditionToken shortly after the subprocess reports startup.',
-    number=20,
+    number=SHORT_ITERATIONS,
 )
 
 all = (  # noqa: A001
