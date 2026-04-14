@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -9,8 +11,26 @@ from cantok import ConditionCancellationError, ConditionToken
 from emptylog import MemoryLogger
 from full_match import match
 
-from suby import RunningCommandError, TimeoutCancellationError, run
+from suby import (
+    EnvironmentVariablesConflict,
+    RunningCommandError,
+    TimeoutCancellationError,
+    WrongDirectoryError,
+    run,
+)
 from suby.subprocess_result import SubprocessResult
+
+
+def _read_child_environment(*names: str, **run_kwargs):
+    script = (
+        'import json, os; '
+        f'names = {list(names)!r}; '
+        'print(json.dumps({name: os.environ.get(name) for name in names}, sort_keys=True))'
+    )
+    result = run(sys.executable, '-c', script, split=False, catch_output=True, **run_kwargs)
+
+    assert result.stdout is not None
+    return json.loads(result.stdout)
 
 
 def test_run_hello_world_and_result_repr_format():
@@ -221,3 +241,200 @@ def test_timeout_raises_timeout_cancellation_error_with_result_and_documented_me
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='', stderr='', returncode=-?\d+, killed_by_token=True\)",
         repr(exc_info.value.result),
     ) is not None
+
+
+def test_environment_variables_default_inheritance_example(monkeypatch):
+    """By default, the child process inherits the parent environment."""
+    monkeypatch.setenv('SUBY_README_PARENT_ENV', 'parent')
+
+    assert _read_child_environment('SUBY_README_PARENT_ENV') == {
+        'SUBY_README_PARENT_ENV': 'parent',
+    }
+
+
+def test_environment_variables_exact_env_example(monkeypatch):
+    """env passes exactly the provided environment mapping."""
+    monkeypatch.setenv('SUBY_README_PARENT_ONLY_ENV', 'parent')
+    child_env = dict(os.environ)
+    child_env['SUBY_README_EXACT_ENV'] = 'child'
+    child_env.pop('SUBY_README_PARENT_ONLY_ENV', None)
+
+    assert _read_child_environment(
+        'SUBY_README_EXACT_ENV',
+        'SUBY_README_PARENT_ONLY_ENV',
+        env=child_env,
+    ) == {
+        'SUBY_README_EXACT_ENV': 'child',
+        'SUBY_README_PARENT_ONLY_ENV': None,
+    }
+
+
+def test_environment_variables_add_env_example(monkeypatch):
+    """add_env extends the current environment and overrides matching variables."""
+    monkeypatch.setenv('SUBY_README_ADD_ENV', 'parent')
+
+    assert _read_child_environment(
+        'SUBY_README_ADD_ENV',
+        'SUBY_README_NEW_ENV',
+        add_env={
+            'SUBY_README_ADD_ENV': 'child',
+            'SUBY_README_NEW_ENV': 'new',
+        },
+    ) == {
+        'SUBY_README_ADD_ENV': 'child',
+        'SUBY_README_NEW_ENV': 'new',
+    }
+
+
+def test_environment_variables_env_and_add_env_sequence_example():
+    """add_env is applied on top of env."""
+    child_env = dict(os.environ)
+    child_env['SUBY_README_ENV_BASE'] = 'base'
+    child_env['SUBY_README_ENV_OVERRIDE'] = 'base'
+
+    assert _read_child_environment(
+        'SUBY_README_ENV_BASE',
+        'SUBY_README_ENV_OVERRIDE',
+        env=child_env,
+        add_env={'SUBY_README_ENV_OVERRIDE': 'overlay'},
+    ) == {
+        'SUBY_README_ENV_BASE': 'base',
+        'SUBY_README_ENV_OVERRIDE': 'overlay',
+    }
+
+
+def test_environment_variables_delete_env_example(monkeypatch):
+    """delete_env removes inherited variables after add_env has been applied."""
+    monkeypatch.setenv('SUBY_README_DROP_ENV', 'drop')
+
+    assert _read_child_environment(
+        'SUBY_README_ADDED_ENV',
+        'SUBY_README_DROP_ENV',
+        add_env={'SUBY_README_ADDED_ENV': 'added'},
+        delete_env=['SUBY_README_DROP_ENV'],
+    ) == {
+        'SUBY_README_ADDED_ENV': 'added',
+        'SUBY_README_DROP_ENV': None,
+    }
+
+
+def test_environment_variables_conflict_example():
+    """delete_env cannot delete variables explicitly set by env or add_env."""
+    with pytest.raises(
+        EnvironmentVariablesConflict,
+        match=match('Environment variables cannot be both set via env/add_env and deleted via delete_env: SUBY_README_CONFLICT_ENV.'),
+    ):
+        run(
+            sys.executable,
+            '-c',
+            'pass',
+            split=False,
+            env={'SUBY_README_CONFLICT_ENV': 'value'},
+            delete_env=['SUBY_README_CONFLICT_ENV'],
+        )
+
+
+def test_changing_directories_path_example(tmp_path, monkeypatch):
+    """The README Path example runs the child process in the requested directory."""
+    monkeypatch.chdir(tmp_path)
+    project = Path('project')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=project,
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_relative_example(tmp_path, monkeypatch):
+    """Relative README examples are resolved from the parent cwd at call time."""
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    project = Path('project')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory='./project/',
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_does_not_change_parent_cwd(tmp_path, monkeypatch):
+    """Passing directory changes only the child process cwd, not the current process cwd."""
+    monkeypatch.chdir(tmp_path)
+    Path('project').mkdir(exist_ok=True)
+    parent_before = Path.cwd()
+
+    run(sys.executable, '-c', 'pass', split=False, directory='./project')
+
+    assert Path.cwd() == parent_before
+
+
+def test_changing_directories_path_with_spaces_example(tmp_path, monkeypatch):
+    """Directory paths containing spaces are passed as one path."""
+    monkeypatch.chdir(tmp_path)
+    project = Path('project with spaces')
+    project.mkdir(exist_ok=True)
+
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=project,
+    )
+
+    assert Path(result.stdout.strip()).resolve() == project.resolve()
+
+
+def test_changing_directories_explicit_home_path_example():
+    """Path.home() is an explicit path and is not shell-style tilde expansion."""
+    result = run(
+        sys.executable,
+        '-c',
+        'import os; print(os.getcwd())',
+        split=False,
+        catch_output=True,
+        directory=Path.home(),
+    )
+
+    assert Path(result.stdout.strip()).resolve() == Path.home().resolve()
+
+
+def test_changing_directories_does_not_expand_tilde(tmp_path, monkeypatch):
+    """The README documents that directory does not perform shell-style tilde expansion."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(WrongDirectoryError, match='does not exist'):
+        run(sys.executable, '-c', 'pass', split=False, directory='~/missing')
+
+
+def test_changing_directories_invalid_directory_is_not_caught_by_catch_exceptions(tmp_path, monkeypatch):
+    """catch_exceptions=True does not suppress invalid directory argument errors."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(WrongDirectoryError) as exc_info:
+        run(
+            sys.executable,
+            '-c',
+            'pass',
+            split=False,
+            catch_exceptions=True,
+            directory='missing-directory',
+        )
+
+    assert str(exc_info.value) == "The directory 'missing-directory' does not exist."

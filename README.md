@@ -35,7 +35,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - [**Quick start**](#quick-start)
 - [**Run subprocess and look at the result**](#run-subprocess-and-look-at-the-result)
 - [**Command parsing**](#command-parsing)
-  - [**Backslashes on Windows**](#backslashes-on-windows)
+- [**Managing directory and environment variables**](#managing-directory-and-environment-variables)
 - [**Output**](#output)
 - [**Logging**](#logging)
 - [**Exceptions**](#exceptions)
@@ -57,7 +57,7 @@ And use it:
 from suby import run
 
 run('python -c "print(\'hello, world!\')"')
-# > hello, world!
+#> hello, world!
 ```
 
 You can also quickly try out this and other packages without installing them, using [instld](https://github.com/pomponchik/instld).
@@ -76,7 +76,7 @@ Let's try to call it:
 ```python
 result = run('python -c "print(\'hello, world!\')"')
 print(result)
-# > SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
+#> SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
 ```
 
 It returns an object of the `SubprocessResult` class, which contains the following fields:
@@ -120,6 +120,8 @@ If you pass `split=False`, you must provide arguments in their final form:
 run('python', '-c', 'print(777)', split=False)
 ```
 
+<details>
+  <summary>Windows has its own quirks when it comes to backslashes.</summary>
 
 ### Backslashes on Windows
 
@@ -140,6 +142,81 @@ run(r'path\to\executable -c pass', double_backslash=True)
 
 Note that this only affects string arguments that go through `shlex` splitting. `Path` objects and arguments passed with `split=False` are not affected.
 
+</details>
+
+
+## Managing directory and environment variables
+
+By default, all commands are executed in the same directory and with the same environment variables as the parent process. However, this can be changed.
+
+Pass a string or a `Path` object containing the directory path as the `directory` argument to change the directory itself:
+
+```python
+from pathlib import Path
+
+run(
+    'python -c "import os; print(os.getcwd())"',
+    directory=Path('project'),
+)
+```
+
+Relative paths are resolved from the parent process's current working directory at the moment `run` is called, so values like `.`, `..`, and `./../.././project/` are valid when they point to an existing directory:
+
+```python
+run('python -c "import os; print(os.getcwd())"', directory='./project/')
+```
+
+`directory` is separate from [command parsing](#command-parsing). It is not split with `shlex`, and it is not affected by `split` or `double_backslash`. A directory path containing spaces is passed as one directory path:
+
+```python
+run('python -c pass', directory='project with spaces')
+```
+
+`directory` does not perform shell-style expansion. If you want a path under your home directory, expand it yourself:
+
+```python
+from pathlib import Path
+
+run('python -c pass', directory=Path.home())
+```
+
+> ⚠️ If the directory is “broken” — for example, if it does not exist, or if there is a file at the specified path instead of a directory — a `suby.errors.WrongDirectoryError` exception will be raised. This exception will not be [caught](#exceptions) if `catch_exceptions=True` is used.
+
+Use `env` when the subprocess should receive exactly the variables you provide:
+
+```python
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    env={'MY_VARIABLE': 'hello'},
+)
+#> hello
+```
+
+> ↑ When `env` is provided, variables from the current process are not added automatically. `env={}` means a truly empty environment, which may make some executables fail on platforms that require system variables.
+
+Use `add_env` to start with the current process environment and add or override selected variables:
+
+```python
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    add_env={'MY_VARIABLE': 'hello'},
+)
+#> hello
+```
+
+And use `delete_env` to remove variables from the environment passed to the subprocess:
+
+```python
+# If MY_VARIABLE exists in the current process environment, it will not be passed to this subprocess.
+run(
+    'python -c "import os; print(os.environ.get(\'MY_VARIABLE\'))"',
+    delete_env=['MY_VARIABLE'],
+)
+#> None
+```
+
+> ⓘ On `Windows`, environment variable names are handled case-insensitively. On other platforms, names are case-sensitive.
+
 
 ## Output
 
@@ -154,7 +231,7 @@ def my_new_stdout(string: str) -> None:
     print(colored(string, 'red'), end='')
 
 run('python -c "print(\'hello, world!\')"', stdout_callback=my_new_stdout)
-# > hello, world!
+#> hello, world!
 # You can't see it here, but if you run this code yourself, the output in the console will be red!
 ```
 
@@ -191,16 +268,16 @@ logging.basicConfig(
 )
 
 run('python -c pass', logger=logging.getLogger('logger_name'))
-# > 2024-02-22 02:15:08,155 [INFO] The beginning of the execution of the command "python -c pass".
-# > 2024-02-22 02:15:08,190 [INFO] The command "python -c pass" has been successfully executed.
+#> 2024-02-22 02:15:08,155 [INFO] The beginning of the execution of the command "python -c pass".
+#> 2024-02-22 02:15:08,190 [INFO] The command "python -c pass" has been successfully executed.
 ```
 
 The message about the start of the command execution is always logged at the `INFO` [level](https://docs.python.org/3/library/logging.html#logging-levels). If the command is completed successfully, the completion message will also be at the `INFO` level. If the command fails, it will be at the `ERROR` level:
 
 ```python
 run('python -c "raise ValueError"', logger=logging.getLogger('logger_name'), catch_exceptions=True, catch_output=True)
-# > 2024-02-22 02:20:25,549 [INFO] The beginning of the execution of the command "python -c "raise ValueError"".
-# > 2024-02-22 02:20:25,590 [ERROR] Error when executing the command "python -c "raise ValueError"".
+#> 2024-02-22 02:20:25,549 [INFO] The beginning of the execution of the command "python -c "raise ValueError"".
+#> 2024-02-22 02:20:25,590 [ERROR] Error when executing the command "python -c "raise ValueError"".
 ```
 
 If you don't need these details, simply omit the logger argument.
@@ -223,7 +300,7 @@ try:
     run('python -c 1/0')
 except RunningCommandError as e:
     print(e)
-    # > Error when executing the command "python -c 1/0".
+    #> Error when executing the command "python -c 1/0".
 ```
 
 2. If the subprocess cannot be started, `suby` raises `RunningCommandError` with a startup-specific message and chains the original `OSError` as `__cause__`. In this case, the attached `result.stdout` and `result.stderr` stay empty because the process never started:
@@ -235,11 +312,11 @@ try:
     run('definitely_missing_command')
 except RunningCommandError as e:
     print(e)
-    # > The executable for the command "definitely_missing_command" was not found.
+    #> The executable for the command "definitely_missing_command" was not found.
     print(type(e.__cause__))
-    # > <class 'FileNotFoundError'>
+    #> <class 'FileNotFoundError'>
     print(e.result.stderr)
-    # >
+    #>
 ```
 
 3. If you pass a [cancellation token](https://cantok.readthedocs.io/en/latest/the_pattern/) when calling the command, and the token is canceled, an exception will be raised [corresponding to the type](https://cantok.readthedocs.io/en/latest/what_are_tokens/exceptions/) of the canceled token. [This feature](#working-with-cancellation-tokens) is integrated with the [cantok](https://cantok.readthedocs.io/en/latest/) library, so we recommend that you familiarize yourself with it first.
@@ -251,7 +328,7 @@ You can prevent `suby` from raising these exceptions. To do this, set the `catch
 ```python
 result = run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True)
 print(result)
-# > SubprocessResult(id='c9125b90d03111ee9660320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='c9125b90d03111ee9660320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
 Keep in mind that the full result of the subprocess call can also be found through the `result` attribute of any exception raised by `suby`:
@@ -263,8 +340,10 @@ try:
     run('python -c "import time; time.sleep(10_000)"', timeout=1)
 except TimeoutCancellationError as e:
     print(e.result)
-    # > SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+    #> SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
+
+`catch_exceptions=True` applies to the four subprocess-related cases above. Invalid [directory](#changing-directories) values still raise their validation exceptions before a subprocess is started.
 
 <details>
   <summary>Notes about callback and token errors</summary>
@@ -300,7 +379,7 @@ from cantok import ConditionToken
 
 token = ConditionToken(lambda: randint(1, 1000) == 7)  # This token will be canceled when a random unlikely event occurs.
 run('python -c "import time; time.sleep(10_000)"', token=token)
-# > cantok.errors.ConditionCancellationError: The cancellation condition was satisfied.
+#> cantok.errors.ConditionCancellationError: The cancellation condition was satisfied.
 ```
 
 However, if you pass the `catch_exceptions=True` argument, the exception will not be raised (see [Exceptions](#exceptions)). Instead, you will get the [usual result](#run-subprocess-and-look-at-the-result) of calling `run` with the `killed_by_token=True` flag:
@@ -308,7 +387,7 @@ However, if you pass the `catch_exceptions=True` argument, the exception will no
 ```python
 token = ConditionToken(lambda: randint(1, 1000) == 7)
 print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True))
-# > SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
 Under the hood, token state is checked while `stdout` and `stderr` are being read. When the token is canceled, the subprocess is killed.
@@ -319,7 +398,7 @@ You can set a timeout for `suby`. It must be a number greater than or equal to z
 
 ```python
 run('python -c "import time; time.sleep(10_000)"', timeout=1)
-# > cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
+#> cantok.errors.TimeoutCancellationError: The timeout of 1 seconds has expired.
 ```
 
 A timeout of `0` is valid and means that the subprocess will be canceled immediately if it has not already exited.
@@ -335,12 +414,12 @@ try:
     run('python -c "import time; time.sleep(10_000)"', timeout=1)
 except TimeoutCancellationError as e:  # As you can see, TimeoutCancellationError is available in the suby module.
     print(e)
-    # > The timeout of 1 seconds has expired.
+    #> The timeout of 1 seconds has expired.
 ```
 
 Just as with [regular cancellation tokens](#working-with-cancellation-tokens), you can prevent exceptions from being raised using the `catch_exceptions=True` argument:
 
 ```python
 print(run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True))
-# > SubprocessResult(id='ea88c518d25011eeb25e320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='ea88c518d25011eeb25e320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```

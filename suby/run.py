@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import stat
+from collections.abc import Mapping as RuntimeMapping
 from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
@@ -13,10 +16,12 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Tuple,
     Type,
+    TypedDict,
     Union,
     cast,
 )
@@ -34,19 +39,32 @@ from emptylog import EmptyLogger, LoggerProtocol
 from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import (
     ConditionCancellationError,
+    EnvironmentVariablesConflict,
     RunningCommandError,
     TimeoutCancellationError,
     WrongCommandError,
+    WrongDirectoryError,
 )
 from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
-StreamCallback = Callable[[str], Any]  # type: ignore[misc]
+StreamCallback = Callable[[str], Any]  # type: ignore[misc, unused-ignore]
 _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
 _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
     CantokConditionCancellationError: ConditionCancellationError,
     CantokTimeoutCancellationError: TimeoutCancellationError,
 }
+
+
+class _TextPopenKwargs(TypedDict, total=False):
+    stdout: int
+    stderr: int
+    bufsize: int
+    text: Literal[True]
+    encoding: str
+    errors: str
+    env: Mapping[str, str]
+    cwd: str
 
 
 class _FailureState:
@@ -87,8 +105,12 @@ def run(  # noqa: PLR0913, PLR0915
     stdout_callback: StreamCallback = stdout_with_flush,
     stderr_callback: StreamCallback = stderr_with_flush,
     timeout: Optional[Union[int, float]] = None,
+    directory: Optional[Union[str, Path]] = None,
     split: bool = True,
     double_backslash: bool = system() == 'Windows',
+    env: Optional[Mapping[str, str]] = None,
+    add_env: Optional[Mapping[str, str]] = None,
+    delete_env: Optional[Union[List[str], Tuple[str, ...]]] = None,
     token: AbstractToken = DefaultToken(),  # noqa: B008
 ) -> SubprocessResult:
     """
@@ -106,21 +128,27 @@ def run(  # noqa: PLR0913, PLR0915
     if not converted_arguments:
         raise WrongCommandError('You must pass at least one positional argument with the command to run.')
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
+    subprocess_env = build_subprocess_env(env, add_env, delete_env)
+    subprocess_directory = prepare_directory(directory)
+    popen_kwargs: _TextPopenKwargs = {
+        'stdout': PIPE,
+        'stderr': PIPE,
+        'bufsize': 1,
+        'text': True,
+        'encoding': 'utf-8',
+        'errors': 'strict',
+    }
+    if subprocess_env is not None:
+        popen_kwargs['env'] = subprocess_env
+    if subprocess_directory is not None:
+        popen_kwargs['cwd'] = subprocess_directory
 
     state = _ExecutionState()
 
     logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
     try:
-        with Popen(
-            list(converted_arguments),
-            stdout=PIPE,
-            stderr=PIPE,
-            bufsize=1,
-            text=True,
-            encoding='utf-8',
-            errors='strict',
-        ) as process:
+        with Popen(list(converted_arguments), **popen_kwargs) as process:
             reader_threads = _ReaderThreads(
                 stdout=run_stdout_thread(process, catch_output, stdout_callback, token, state),
                 stderr=run_stderr_thread(process, catch_output, stderr_callback, token, state),
@@ -228,6 +256,179 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     if double_backslash:
         argument = argument.replace('\\', '\\\\')
     return shlex_split(argument)
+
+
+def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
+    if directory is None:
+        return None
+
+    if isinstance(directory, str):
+        raw_text = directory
+    elif isinstance(directory, Path):
+        raw_text = str(directory)
+    else:
+        raise TypeError(f'directory must be a string or pathlib.Path object, got {directory!r} ({type(directory).__name__}).')
+
+    if raw_text == '':
+        raise WrongDirectoryError('directory must not be an empty string; use "." for the current directory.')
+    if '\x00' in raw_text:
+        raise WrongDirectoryError(f'directory must not contain null bytes, got {raw_text!r}.')
+
+    path = Path(raw_text)
+    if path.is_absolute():
+        cwd_path = path
+    else:
+        try:
+            current_directory = Path.cwd()
+        except OSError as error:
+            raise WrongDirectoryError(f'Could not determine the current working directory while resolving directory {raw_text!r}.') from error
+        cwd_path = current_directory / path
+
+    try:
+        directory_stat = cwd_path.stat()
+    except FileNotFoundError as error:
+        if has_file_parent(cwd_path):
+            raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error  # pragma: no cover (!Windows)
+        raise WrongDirectoryError(f'The directory {raw_text!r} does not exist.') from error
+    except NotADirectoryError as error:
+        raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error  # pragma: no cover (Windows)
+    except PermissionError as error:
+        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.') from error
+    except OSError as error:
+        raise WrongDirectoryError(f'Could not access directory {raw_text!r}: {error}.') from error
+
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise WrongDirectoryError(f'The path {raw_text!r} exists but is not a directory.')
+    if os.name != 'nt' and not os.access(cwd_path, os.X_OK):
+        raise WrongDirectoryError(f'Permission denied when accessing directory {raw_text!r}.')  # pragma: no cover (Windows)
+
+    return str(cwd_path)
+
+
+def has_file_parent(path: Path) -> bool:
+    for parent in path.parents:
+        try:
+            parent_stat = parent.stat()
+        except OSError:
+            continue
+        return not stat.S_ISDIR(parent_stat.st_mode)
+    return False
+
+
+def build_subprocess_env(
+    env: Optional[Mapping[str, str]],
+    add_env: Optional[Mapping[str, str]],
+    delete_env: Optional[Union[List[str], Tuple[str, ...]]],
+) -> Optional[Dict[str, str]]:
+    validate_environment_mapping('env', env)
+    validate_environment_mapping('add_env', add_env)
+    validate_delete_env(delete_env)
+
+    if env is None and is_empty_collection(add_env) and is_empty_collection(delete_env):
+        return None
+
+    use_case_insensitive_names = system() == 'Windows'
+    raise_environment_variables_conflict_if_needed(env, add_env, delete_env, use_case_insensitive_names)
+
+    prepared_env: Dict[str, str] = {}
+    if env is None:
+        apply_environment_mapping(prepared_env, os.environ, use_case_insensitive_names)
+    else:
+        apply_environment_mapping(prepared_env, env, use_case_insensitive_names)
+
+    if add_env is not None:
+        apply_environment_mapping(prepared_env, add_env, use_case_insensitive_names)
+
+    if delete_env is not None:
+        for name in delete_env:
+            prepared_env.pop(normalize_environment_variable_name(name, use_case_insensitive_names), None)
+
+    return prepared_env
+
+
+def validate_environment_mapping(name: str, value: Optional[Mapping[str, str]]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, RuntimeMapping):
+        raise TypeError(f'{name} must be a mapping of str to str, got {type(value).__name__}.')
+    for key, item_value in value.items():
+        if not isinstance(key, str):
+            raise TypeError(f'{name} keys must be str, got {key!r} ({type(key).__name__}).')
+        validate_environment_variable_name_content(f'{name} keys', key)
+        if not isinstance(item_value, str):
+            raise TypeError(f'{name} values must be str, got {item_value!r} ({type(item_value).__name__}) for key {key!r}.')
+        validate_environment_variable_value_content(f'{name} values', item_value, key)
+
+
+def validate_delete_env(delete_env: Optional[Union[List[str], Tuple[str, ...]]]) -> None:
+    if delete_env is None:
+        return
+    if not isinstance(delete_env, (list, tuple)):
+        raise TypeError(f'delete_env must be a list or tuple of str, got {type(delete_env).__name__}.')
+    for item in delete_env:
+        if not isinstance(item, str):
+            raise TypeError(f'delete_env items must be str, got {item!r} ({type(item).__name__}).')
+        validate_environment_variable_name_content('delete_env items', item)
+
+
+def validate_environment_variable_name_content(description: str, name: str) -> None:
+    if '=' in name or '\x00' in name:
+        raise TypeError(f"{description} must not contain '=' or null bytes, got {name!r}.")
+
+
+def validate_environment_variable_value_content(description: str, value: str, key: str) -> None:
+    if '\x00' in value:
+        raise TypeError(f'{description} must not contain null bytes, got {value!r} for key {key!r}.')
+
+
+def is_empty_collection(value: Optional[Union[Mapping[str, str], List[str], Tuple[str, ...]]]) -> bool:
+    return value is None or len(value) == 0
+
+
+def apply_environment_mapping(
+    target: Dict[str, str],
+    source: Mapping[str, str],
+    use_case_insensitive_names: bool,
+) -> None:
+    for key, value in source.items():
+        target[normalize_environment_variable_name(key, use_case_insensitive_names)] = value
+
+
+def raise_environment_variables_conflict_if_needed(
+    env: Optional[Mapping[str, str]],
+    add_env: Optional[Mapping[str, str]],
+    delete_env: Optional[Union[List[str], Tuple[str, ...]]],
+    use_case_insensitive_names: bool,
+) -> None:
+    if delete_env is None:
+        return
+
+    explicit_names = set()
+    for mapping in (env, add_env):
+        if mapping is None:
+            continue
+        for key in mapping:
+            explicit_names.add(normalize_environment_variable_name(key, use_case_insensitive_names))
+
+    conflict_names = []
+    seen_conflict_names = set()
+    for name in delete_env:
+        normalized_name = normalize_environment_variable_name(name, use_case_insensitive_names)
+        if normalized_name not in explicit_names or normalized_name in seen_conflict_names:
+            continue
+        seen_conflict_names.add(normalized_name)
+        conflict_names.append(name)
+
+    if conflict_names:
+        raise EnvironmentVariablesConflict(
+            f'Environment variables cannot be both set via env/add_env and deleted via delete_env: {", ".join(conflict_names)}.',
+        )
+
+
+def normalize_environment_variable_name(name: str, use_case_insensitive_names: bool) -> str:
+    if use_case_insensitive_names:
+        return name.upper()
+    return name
 
 
 def run_timeout_thread(process: Popen[str], timeout: Union[int, float], result: SubprocessResult) -> Thread:
