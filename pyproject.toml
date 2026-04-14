@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suby"
-version = "0.0.5"
+version = "0.0.6"
 authors = [
   { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
 ]
@@ -14,6 +14,7 @@ requires-python = ">=3.8"
 dependencies = [
     'emptylog>=0.0.12',
     'cantok>=0.0.36',
+    'microbenchmark>=0.0.2',
 ]
 classifiers = [
     "Operating System :: OS Independent",
@@ -58,6 +59,7 @@ source = ["suby"]
 
 [tool.pytest.ini_options]
 norecursedirs = ["build", "mutants"]
+testpaths = ["tests/documentation", "tests/typing", "tests/units"]
 
 [tool.ruff]
 lint.ignore = ['E501', 'E712', 'PTH123', 'PTH118', 'PLR2004', 'PTH107', 'SIM105', 'SIM102', 'RET503', 'PLR0912', 'C901', 'E731', 'F821']
