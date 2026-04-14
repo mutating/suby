@@ -15,10 +15,12 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Tuple,
     Type,
+    TypedDict,
     Union,
     cast,
 )
@@ -50,6 +52,16 @@ _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationErr
     CantokConditionCancellationError: ConditionCancellationError,
     CantokTimeoutCancellationError: TimeoutCancellationError,
 }
+
+
+class _TextPopenKwargs(TypedDict, total=False):
+    stdout: int
+    stderr: int
+    bufsize: int
+    text: Literal[True]
+    encoding: str
+    errors: str
+    env: Mapping[str, str]
 
 
 class _FailureState:
@@ -113,7 +125,7 @@ def run(  # noqa: PLR0913, PLR0915
         raise WrongCommandError('You must pass at least one positional argument with the command to run.')
     arguments_string_representation = ' '.join([argument if ' ' not in argument else f'"{argument}"' for argument in converted_arguments])
     subprocess_env = build_subprocess_env(env, add_env, delete_env)
-    popen_kwargs: Dict[str, Any] = {
+    popen_kwargs: _TextPopenKwargs = {
         'stdout': PIPE,
         'stderr': PIPE,
         'bufsize': 1,
@@ -129,10 +141,7 @@ def run(  # noqa: PLR0913, PLR0915
     logger.info(f'The beginning of the execution of the command "{arguments_string_representation}".')
 
     try:
-        with Popen(
-            list(converted_arguments),
-            **popen_kwargs,
-        ) as process:
+        with Popen(list(converted_arguments), **popen_kwargs) as process:
             reader_threads = _ReaderThreads(
                 stdout=run_stdout_thread(process, catch_output, stdout_callback, token, state),
                 stderr=run_stderr_thread(process, catch_output, stderr_callback, token, state),
