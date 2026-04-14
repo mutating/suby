@@ -288,7 +288,7 @@ def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
         directory_stat = cwd_path.stat()
     except FileNotFoundError as error:
         if has_file_parent(cwd_path):
-            raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
+            raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error  # pragma: no cover (!Windows)
         raise WrongDirectoryError(f'The directory {raw_text!r} does not exist.') from error
     except NotADirectoryError as error:
         raise WrongDirectoryError(f'The directory {raw_text!r} cannot be resolved because an intermediate component is not a directory.') from error
