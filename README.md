@@ -122,6 +122,8 @@ If you pass `split=False`, you must provide arguments in their final form:
 run('python', '-c', 'print(777)', split=False)
 ```
 
+<details>
+  <summary>Windows has its own quirks when it comes to backslashes.</summary>
 
 ### Backslashes on Windows
 
@@ -141,6 +143,8 @@ run(r'path\to\executable -c pass', double_backslash=True)
 ```
 
 Note that this only affects string arguments that go through `shlex` splitting. `Path` objects and arguments passed with `split=False` are not affected.
+
+</details>
 
 
 ## Output
