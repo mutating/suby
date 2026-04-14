@@ -358,6 +358,14 @@ def test_windows_intermediate_file_after_filenotfound_is_reported_as_intermediat
         run(sys.executable, '-c', 'pass', split=False, directory=file_path / 'child')
 
 
+def test_has_file_parent_returns_false_for_filesystem_root():
+    """A filesystem root has no parent components to classify as files."""
+    filesystem_root = Path(Path.cwd().anchor)
+
+    assert list(filesystem_root.parents) == []
+    assert _run_module.has_file_parent(filesystem_root) is False
+
+
 @pytest.mark.parametrize(
     ('directory', 'error_type', 'message'),
     [
