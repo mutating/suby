@@ -1,4 +1,4 @@
-from functools import partial
+import time
 from pathlib import Path
 
 from microbenchmark import Scenario, ScenarioGroup
@@ -20,6 +20,7 @@ SCENARIOS = [
     benchmarks.simple_token_success,
     benchmarks.condition_token_success,
     benchmarks.cancelled_token_before_start,
+    benchmarks.simple_token_cancel_after_start,
 ]
 
 OUTPUT_SCENARIOS = [
@@ -36,7 +37,7 @@ OUTPUT_SCENARIOS = [
 def run_once(scenario: Scenario) -> None:
     Scenario(
         scenario.function,
-        scenario._args,
+        scenario._arguments,
         name=scenario.name,
         doc=scenario.doc,
         number=1,
@@ -61,7 +62,11 @@ def test_benchmark_docs_are_present():
 
 def test_benchmark_iteration_counts():
     for scenario in SCENARIOS:
-        if scenario in (benchmarks.short_sleep, benchmarks.cancelled_token_before_start):
+        if scenario in (
+            benchmarks.short_sleep,
+            benchmarks.cancelled_token_before_start,
+            benchmarks.simple_token_cancel_after_start,
+        ):
             assert scenario.number == 20
         else:
             assert scenario.number == benchmarks.ITERATIONS
@@ -86,24 +91,65 @@ def test_benchmarks_use_run_directly():
     for scenario in SCENARIOS:
         function = scenario.function
 
-        if isinstance(function, partial):
-            assert function.func is run
+        if function is benchmarks.run_with_delayed_simple_token_cancellation:
+            assert scenario is benchmarks.simple_token_cancel_after_start
         else:
             assert function is run
 
 
 def test_key_benchmark_arguments():
-    assert benchmarks.simple_success._args == [benchmarks.PYTHON, '-c', 'pass']
-    assert benchmarks.python_version_output._args == [benchmarks.PYTHON, '-VV']
-    assert isinstance(benchmarks.string_executable._args[0], str)
-    assert isinstance(benchmarks.path_argument._args[-1], Path)
-    assert benchmarks.short_sleep._args == [
+    assert benchmarks.simple_success._arguments.args == (benchmarks.PYTHON, '-c', 'pass')
+    assert benchmarks.python_version_output._arguments.args == (benchmarks.PYTHON, '-VV')
+    assert benchmarks.python_version_output._arguments.kwargs == {'catch_output': True}
+    assert isinstance(benchmarks.string_executable._arguments.args[0], str)
+    assert isinstance(benchmarks.path_argument._arguments.args[-1], Path)
+    assert benchmarks.path_argument._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.multi_line_stdout._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.large_stdout._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.stderr_output._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.mixed_stdout_stderr._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.many_short_lines._arguments.kwargs == {'catch_output': True}
+    assert benchmarks.short_sleep._arguments.args == (
         benchmarks.PYTHON,
         '-c "import time; time.sleep(0.01)"',
-    ]
-    assert benchmarks.simple_token_success._args == [benchmarks.PYTHON, '-c', 'pass']
-    assert benchmarks.condition_token_success._args == [benchmarks.PYTHON, '-c', 'pass']
-    assert benchmarks.cancelled_token_before_start._args == [
+    )
+    assert benchmarks.simple_token_success._arguments.args == (benchmarks.PYTHON, '-c', 'pass')
+    assert set(benchmarks.simple_token_success._arguments.kwargs) == {'token'}
+    assert benchmarks.condition_token_success._arguments.args == (benchmarks.PYTHON, '-c', 'pass')
+    assert set(benchmarks.condition_token_success._arguments.kwargs) == {'token'}
+    assert benchmarks.cancelled_token_before_start._arguments.args == (
         benchmarks.PYTHON,
         '-c "import time; time.sleep(1)"',
-    ]
+    )
+    assert set(benchmarks.cancelled_token_before_start._arguments.kwargs) == {
+        'token',
+        'catch_exceptions',
+        'catch_output',
+    }
+    assert benchmarks.cancelled_token_before_start._arguments.kwargs['catch_exceptions'] is True
+    assert benchmarks.cancelled_token_before_start._arguments.kwargs['catch_output'] is True
+    assert benchmarks.simple_token_cancel_after_start._arguments is None
+
+
+def test_delayed_simple_token_cancellation_timer_starts_after_subprocess_marker(monkeypatch):
+    observed_states = []
+
+    def fake_run(*arguments, **kwargs):
+        token = kwargs['token']
+        marker_file = arguments[-1]
+
+        time.sleep(0.02)
+        observed_states.append(bool(token))
+
+        marker_file.touch()
+        deadline = time.monotonic() + 1
+        while bool(token) and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+        observed_states.append(bool(token))
+
+    monkeypatch.setattr(benchmarks, 'run', fake_run)
+
+    benchmarks.run_with_delayed_simple_token_cancellation()
+
+    assert observed_states == [True, False]
