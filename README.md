@@ -35,7 +35,6 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - [**Quick start**](#quick-start)
 - [**Run subprocess and look at the result**](#run-subprocess-and-look-at-the-result)
 - [**Command parsing**](#command-parsing)
-  - [**Backslashes on Windows**](#backslashes-on-windows)
 - [**Output**](#output)
 - [**Logging**](#logging)
 - [**Exceptions**](#exceptions)
