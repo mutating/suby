@@ -142,11 +142,20 @@ def test_delayed_condition_token_cancellation_timer_starts_after_subprocess_mark
         observed_states.append(bool(token))
 
         marker_file.touch()
-        time.sleep(0.02)
+        marker_mtime_ns = marker_file.stat().st_mtime_ns
+        times = iter(
+            (
+                marker_mtime_ns + 1_000_000,
+                marker_mtime_ns + 20_000_000,
+            ),
+        )
+        monkeypatch.setattr(benchmarks, 'time_ns', lambda: next(times))
+
+        observed_states.append(bool(token))
         observed_states.append(bool(token))
 
     monkeypatch.setattr(benchmarks, 'run', fake_run)
 
     benchmarks.run_with_delayed_condition_token_cancellation()
 
-    assert observed_states == [True, False]
+    assert observed_states == [True, True, False]
