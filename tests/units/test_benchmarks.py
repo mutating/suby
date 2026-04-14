@@ -20,7 +20,7 @@ SCENARIOS = [
     benchmarks.simple_token_success,
     benchmarks.condition_token_success,
     benchmarks.cancelled_token_before_start,
-    benchmarks.simple_token_cancel_after_start,
+    benchmarks.condition_token_cancel_after_start,
 ]
 
 OUTPUT_SCENARIOS = [
@@ -65,7 +65,7 @@ def test_benchmark_iteration_counts():
         if scenario in (
             benchmarks.short_sleep,
             benchmarks.cancelled_token_before_start,
-            benchmarks.simple_token_cancel_after_start,
+            benchmarks.condition_token_cancel_after_start,
         ):
             assert scenario.number == 20
         else:
@@ -91,8 +91,8 @@ def test_benchmarks_use_run_directly():
     for scenario in SCENARIOS:
         function = scenario.function
 
-        if function is benchmarks.run_with_delayed_simple_token_cancellation:
-            assert scenario is benchmarks.simple_token_cancel_after_start
+        if function is benchmarks.run_with_delayed_condition_token_cancellation:
+            assert scenario is benchmarks.condition_token_cancel_after_start
         else:
             assert function is run
 
@@ -128,10 +128,10 @@ def test_key_benchmark_arguments():
     }
     assert benchmarks.cancelled_token_before_start._arguments.kwargs['catch_exceptions'] is True
     assert benchmarks.cancelled_token_before_start._arguments.kwargs['catch_output'] is True
-    assert benchmarks.simple_token_cancel_after_start._arguments is None
+    assert benchmarks.condition_token_cancel_after_start._arguments is None
 
 
-def test_delayed_simple_token_cancellation_timer_starts_after_subprocess_marker(monkeypatch):
+def test_delayed_condition_token_cancellation_timer_starts_after_subprocess_marker(monkeypatch):
     observed_states = []
 
     def fake_run(*arguments, **kwargs):
@@ -142,14 +142,11 @@ def test_delayed_simple_token_cancellation_timer_starts_after_subprocess_marker(
         observed_states.append(bool(token))
 
         marker_file.touch()
-        deadline = time.monotonic() + 1
-        while bool(token) and time.monotonic() < deadline:
-            time.sleep(0.001)
-
+        time.sleep(0.02)
         observed_states.append(bool(token))
 
     monkeypatch.setattr(benchmarks, 'run', fake_run)
 
-    benchmarks.run_with_delayed_simple_token_cancellation()
+    benchmarks.run_with_delayed_condition_token_cancellation()
 
     assert observed_states == [True, False]

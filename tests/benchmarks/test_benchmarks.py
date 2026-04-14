@@ -17,7 +17,7 @@ SCENARIOS = [
     benchmarks.simple_token_success,
     benchmarks.condition_token_success,
     benchmarks.cancelled_token_before_start,
-    benchmarks.simple_token_cancel_after_start,
+    benchmarks.condition_token_cancel_after_start,
 ]
 
 

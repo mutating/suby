@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from time import time_ns
 
 from cantok import ConditionToken, SimpleToken
 from microbenchmark import Scenario, a
@@ -14,48 +14,36 @@ ITERATIONS = 100
 PYTHON = Path(sys.executable)
 
 
-def _cancel_token_after_subprocess_start(token: SimpleToken, marker_file: Path, stop_event: Event) -> None:
-    while not stop_event.is_set():
-        if marker_file.exists():
-            if not stop_event.wait(0.01):
-                token.cancel()
-            return
-
-        stop_event.wait(0.0001)
-
-
-def run_with_delayed_simple_token_cancellation() -> None:
-    token = SimpleToken()
-    stop_event = Event()
-
+def run_with_delayed_condition_token_cancellation() -> None:
     with TemporaryDirectory() as temporary_directory:
         marker_file = Path(temporary_directory) / 'subprocess-started'
-        cancellation_thread = Thread(
-            target=_cancel_token_after_subprocess_start,
-            args=(token, marker_file, stop_event),
-        )
-        cancellation_thread.start()
+        subprocess_started_at_ns = None
 
-        try:
-            run(
-                PYTHON,
-                '-c',
-                (
-                    'import sys\n'
-                    'import time\n'
-                    'from pathlib import Path\n'
-                    'Path(sys.argv[1]).touch()\n'
-                    'time.sleep(1)'
-                ),
-                marker_file,
-                split=False,
-                token=token,
-                catch_exceptions=True,
-                catch_output=True,
-            )
-        finally:
-            stop_event.set()
-            cancellation_thread.join()
+        def should_cancel() -> bool:
+            nonlocal subprocess_started_at_ns
+
+            if not marker_file.exists():
+                return False
+            if subprocess_started_at_ns is None:
+                subprocess_started_at_ns = marker_file.stat().st_mtime_ns
+            return time_ns() - subprocess_started_at_ns >= 10_000_000
+
+        run(
+            PYTHON,
+            '-c',
+            (
+                'import sys\n'
+                'import time\n'
+                'from pathlib import Path\n'
+                'Path(sys.argv[1]).touch()\n'
+                'time.sleep(1)'
+            ),
+            marker_file,
+            split=False,
+            token=ConditionToken(should_cancel),
+            catch_exceptions=True,
+            catch_output=True,
+        )
 
 
 simple_success = Scenario(
@@ -176,10 +164,10 @@ cancelled_token_before_start = Scenario(
     number=20,
 )
 
-simple_token_cancel_after_start = Scenario(
-    run_with_delayed_simple_token_cancellation,
-    name='simple_token_cancel_after_start',
-    doc='Starts a subprocess with an active SimpleToken and cancels it shortly after startup.',
+condition_token_cancel_after_start = Scenario(
+    run_with_delayed_condition_token_cancellation,
+    name='condition_token_cancel_after_start',
+    doc='Starts a subprocess and cancels it with a ConditionToken shortly after the subprocess reports startup.',
     number=20,
 )
 
@@ -198,5 +186,5 @@ all = (  # noqa: A001
     + simple_token_success
     + condition_token_success
     + cancelled_token_before_start
-    + simple_token_cancel_after_start
+    + condition_token_cancel_after_start
 )
