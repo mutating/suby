@@ -41,8 +41,6 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - [**Exceptions**](#exceptions)
 - [**Working with Cancellation Tokens**](#working-with-cancellation-tokens)
 - [**Timeouts**](#timeouts)
-- [**Environment variables**](#environment-variables)
-- [**Changing directories**](#changing-directories)
 
 
 ## Quick start
