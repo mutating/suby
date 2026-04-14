@@ -35,6 +35,7 @@ Suby is a small wrapper around the [subprocess](https://docs.python.org/3/librar
 - [**Quick start**](#quick-start)
 - [**Run subprocess and look at the result**](#run-subprocess-and-look-at-the-result)
 - [**Command parsing**](#command-parsing)
+- [**Managing directory and environment variables**](#managing-directory-and-environment-variables)
 - [**Output**](#output)
 - [**Logging**](#logging)
 - [**Exceptions**](#exceptions)
@@ -144,6 +145,44 @@ run(r'path\to\executable -c pass', double_backslash=True)
 Note that this only affects string arguments that go through `shlex` splitting. `Path` objects and arguments passed with `split=False` are not affected.
 
 </details>
+
+
+## Managing directory and environment variables
+
+By default, all commands are executed in the same directory and with the same environment variables as the parent process. However, this can be changed.
+
+Pass a string or a `Path` object containing the directory path as the `directory` argument to change the directory itself:
+
+```python
+from pathlib import Path
+
+run(
+    'python -c "import os; print(os.getcwd())"',
+    directory=Path('project'),
+)
+```
+
+Relative paths are resolved from the parent process's current working directory at the moment `run` is called, so values like `.`, `..`, and `./../.././project/` are valid when they point to an existing directory:
+
+```python
+run('python -c "import os; print(os.getcwd())"', directory='./project/')
+```
+
+`directory` is separate from [command parsing](#command-parsing). It is not split with `shlex`, and it is not affected by `split` or `double_backslash`. A directory path containing spaces is passed as one directory path:
+
+```python
+run('python -c pass', directory='project with spaces')
+```
+
+`directory` does not perform shell-style expansion. If you want a path under your home directory, expand it yourself:
+
+```python
+from pathlib import Path
+
+run('python -c pass', directory=Path.home())
+```
+
+> ⚠️ If the directory is “broken” — for example, if it does not exist, or if there is a file at the specified path instead of a directory — a `suby.errors.WrongDirectoryError` exception will be raised. This exception will not be [caught](#exceptions) if `catch_exceptions=True` is used.
 
 
 ## Output
@@ -423,71 +462,3 @@ except EnvironmentVariablesConflict as error:
 ```
 
 On `Windows`, environment variable names are handled case-insensitively. On other platforms, names are case-sensitive.
-
-
-## Changing directories
-
-By default, a subprocess starts in the same current working directory as the current process. Pass `directory` when the command should run somewhere else:
-
-```python
-from pathlib import Path
-
-run(
-    'python -c "import os; print(os.getcwd())"',
-    directory=Path('project'),
-)
-```
-
-The directory must already exist. Passing `directory` changes only the subprocess working directory; it does not change the current process directory:
-
-```python
-from pathlib import Path
-
-before = Path.cwd()
-run('python -c pass', directory='project')
-assert Path.cwd() == before
-```
-
-The `directory` argument accepts a string or a `Path` object. Relative paths are resolved from the parent process's current working directory at the moment `run` is called, so values like `.`, `..`, and `./../.././project/` are valid when they point to an existing directory:
-
-```python
-run('python -c "import os; print(os.getcwd())"', directory='./project/')
-```
-
-`directory` is separate from command parsing. It is not split with `shlex`, and it is not affected by `split` or `double_backslash`. A directory path containing spaces is passed as one directory path:
-
-```python
-run('python -c pass', directory='project with spaces')
-```
-
-`directory` does not perform shell-style expansion. If you want a path under your home directory, expand it yourself:
-
-```python
-from pathlib import Path
-
-run('python -c pass', directory=Path.home())
-```
-
-Invalid directories raise `WrongDirectoryError` before the subprocess is started:
-
-```python
-from suby import WrongDirectoryError
-
-try:
-    run('python -c pass', directory='missing-directory')
-except WrongDirectoryError as error:
-    print(error)
-    #> The directory 'missing-directory' does not exist.
-```
-
-`catch_exceptions=True` does not hide invalid directory arguments, because those errors are raised before subprocess execution begins:
-
-```python
-from suby import WrongDirectoryError
-
-try:
-    run('python -c pass', directory='missing-directory', catch_exceptions=True)
-except WrongDirectoryError as error:
-    print(error)
-    #> The directory 'missing-directory' does not exist.
-```
