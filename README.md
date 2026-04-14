@@ -248,7 +248,7 @@ except RunningCommandError as e:
 
 4. If a [timeout](#timeouts) you set for the operation expires.
 
-For subprocess startup failures, non-zero return codes, cancellation-token stops, and timeouts, you can ask `suby` to return a `SubprocessResult` instead of raising. To do this, set the `catch_exceptions` parameter to `True`:
+You can prevent `suby` from raising these exceptions. To do this, set the `catch_exceptions` parameter to `True`:
 
 ```python
 result = run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True)
@@ -268,7 +268,7 @@ except TimeoutCancellationError as e:
     # > SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
 ```
 
-`catch_exceptions=True` does not suppress invalid arguments passed to `run`. For example, malformed commands, invalid environment controls, and invalid [directory](#changing-directories) values still raise their validation exceptions before a subprocess is started.
+`catch_exceptions=True` applies to the four subprocess-related cases above. Invalid [directory](#changing-directories) values still raise their validation exceptions before a subprocess is started.
 
 <details>
   <summary>Notes about callback and token errors</summary>
@@ -424,56 +424,37 @@ On `Windows`, environment variable names are handled case-insensitively. On othe
 
 ## Changing directories
 
-By default, a subprocess starts in the same current working directory as the current process:
-
-```python
-run('python -c "import os; print(os.getcwd())"')
-```
-
-Use `directory` when the command should run somewhere else:
+By default, a subprocess starts in the same current working directory as the current process. Pass `directory` when the command should run somewhere else:
 
 ```python
 from pathlib import Path
 
-project = Path('project')
-project.mkdir(exist_ok=True)
-
 run(
     'python -c "import os; print(os.getcwd())"',
-    directory=project,
+    directory=Path('project'),
 )
+```
+
+The directory must already exist. Passing `directory` changes only the subprocess working directory; it does not change the current process directory:
+
+```python
+from pathlib import Path
+
+before = Path.cwd()
+run('python -c pass', directory='project')
+assert Path.cwd() == before
 ```
 
 The `directory` argument accepts a string or a `Path` object. Relative paths are resolved from the parent process's current working directory at the moment `run` is called, so values like `.`, `..`, and `./../.././project/` are valid when they point to an existing directory:
 
 ```python
-from pathlib import Path
-
-Path('project').mkdir(exist_ok=True)
-
 run('python -c "import os; print(os.getcwd())"', directory='./project/')
-```
-
-Changing the subprocess directory does not change the current process directory:
-
-```python
-from pathlib import Path
-
-Path('project').mkdir(exist_ok=True)
-before = Path.cwd()
-run('python -c pass', directory='./project')
-assert Path.cwd() == before
 ```
 
 `directory` is separate from command parsing. It is not split with `shlex`, and it is not affected by `split` or `double_backslash`. A directory path containing spaces is passed as one directory path:
 
 ```python
-from pathlib import Path
-
-project = Path('project with spaces')
-project.mkdir(exist_ok=True)
-
-run('python -c pass', directory=project)
+run('python -c pass', directory='project with spaces')
 ```
 
 `directory` does not perform shell-style expansion. If you want a path under your home directory, expand it yourself:
