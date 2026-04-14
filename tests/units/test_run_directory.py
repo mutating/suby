@@ -348,6 +348,16 @@ def test_invalid_directory_paths_raise_wrong_directory_error(tmp_path, directory
         run(sys.executable, '-c', 'pass', split=False, directory=directory_factory(tmp_path))
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows reports file.txt/child as FileNotFoundError instead of NotADirectoryError')
+def test_windows_intermediate_file_after_filenotfound_is_reported_as_intermediate_component(tmp_path):
+    """Windows FileNotFoundError for file-as-parent paths is reclassified as an intermediate component error."""
+    file_path = tmp_path / 'file.txt'
+    file_path.write_text('content')
+
+    with pytest.raises(WrongDirectoryError, match='intermediate component'):
+        run(sys.executable, '-c', 'pass', split=False, directory=file_path / 'child')
+
+
 @pytest.mark.parametrize(
     ('directory', 'error_type', 'message'),
     [
