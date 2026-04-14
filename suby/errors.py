@@ -8,6 +8,10 @@ class ConditionCancellationError(CantokConditionCancellationError):
     result: SubprocessResult  # pragma: no cover (py314+)
 
 
+class EnvironmentVariablesConflict(ValueError):  # noqa: N818
+    ...
+
+
 class RunningCommandError(Exception):
     def __init__(self, message: str, subprocess_result: SubprocessResult) -> None:
         self.result = subprocess_result

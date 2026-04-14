@@ -1,6 +1,7 @@
 import os
+from collections.abc import Mapping as CollectionsMapping
 from pathlib import Path, PurePath
-from typing import Any, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypedDict, Union
 
 import pytest
 from cantok import AbstractToken, ConditionToken, DefaultToken, SimpleToken
@@ -9,9 +10,13 @@ from emptylog import EmptyLogger, MemoryLogger
 import suby
 from suby import (
     ConditionCancellationError,
+    EnvironmentVariablesConflict,
     RunningCommandError,
     TimeoutCancellationError,
     run,
+)
+from suby.errors import (
+    EnvironmentVariablesConflict as ModuleEnvironmentVariablesConflict,
 )
 from suby.subprocess_result import SubprocessResult
 
@@ -90,7 +95,53 @@ def test_run_rejects_non_boolean_keyword_flags_and_unknown_kwargs() -> None:
     run('python -c pass', double_backslash='false')  # E: [arg-type]
     run('python -c pass', catchOutput=True)  # E: [call-arg]
     run('python -c pass', cwd='.')  # E: [call-arg]
-    run('python -c pass', env={})  # E: [call-arg]
+
+
+@pytest.mark.mypy_testing
+def test_run_accepts_environment_keyword_arguments() -> None:
+    """Environment controls accept mappings of str to str and list/tuple delete names."""
+    dict_env: Dict[str, str] = {'A': '1'}
+    mapping_env: Mapping[str, str] = {'B': '2'}
+    collections_mapping_env: CollectionsMapping[str, str] = {'C': '3'}
+    delete_list: List[str] = ['A']
+    delete_tuple: Tuple[str, ...] = ('B',)
+
+    run('python -c pass', env={})
+    run('python -c pass', env=dict_env)
+    run('python -c pass', env=mapping_env)
+    run('python -c pass', env=collections_mapping_env)
+    run('python -c pass', env=os.environ)
+    run('python -c pass', add_env=dict_env)
+    run('python -c pass', add_env=mapping_env)
+    run('python -c pass', add_env=collections_mapping_env)
+    run('python -c pass', add_env=os.environ)
+    run('python -c pass', delete_env=delete_list)
+    run('python -c pass', delete_env=delete_tuple)
+    run('python -c pass', env=dict_env, add_env=mapping_env, delete_env=delete_tuple)
+
+
+@pytest.mark.mypy_testing
+def test_run_rejects_invalid_environment_keyword_arguments() -> None:
+    """mypy rejects environment controls with invalid container, key, value, or delete-name types."""
+    bytes_env: Dict[bytes, str] = {b'A': '1'}
+    int_value_env: Dict[str, int] = {'A': 1}
+    list_env = [('A', '1')]
+    tuple_env = (('A', '1'),)
+    delete_set = {'A'}
+    delete_string = 'A'
+    delete_ints: List[int] = [1]
+
+    run('python -c pass', env=bytes_env)  # E: [arg-type]
+    run('python -c pass', env=int_value_env)  # E: [arg-type]
+    run('python -c pass', env=list_env)  # E: [arg-type]
+    run('python -c pass', env=tuple_env)  # E: [arg-type]
+    run('python -c pass', add_env=bytes_env)  # E: [arg-type]
+    run('python -c pass', add_env=int_value_env)  # E: [arg-type]
+    run('python -c pass', add_env=list_env)  # E: [arg-type]
+    run('python -c pass', add_env=tuple_env)  # E: [arg-type]
+    run('python -c pass', delete_env=delete_set)  # E: [arg-type]
+    run('python -c pass', delete_env=delete_string)  # E: [arg-type]
+    run('python -c pass', delete_env=delete_ints)  # E: [arg-type]
 
 
 @pytest.mark.mypy_testing
@@ -331,6 +382,9 @@ def test_run_accepts_valid_typed_kwargs_unpacking() -> None:
         split: bool
         double_backslash: bool
         timeout: Union[int, float, None]
+        env: Mapping[str, str]
+        add_env: Mapping[str, str]
+        delete_env: Tuple[str, ...]
 
     kwargs: RunKwargs = {
         'catch_output': True,
@@ -338,6 +392,9 @@ def test_run_accepts_valid_typed_kwargs_unpacking() -> None:
         'split': True,
         'double_backslash': True,
         'timeout': 1,
+        'env': {'A': '1'},
+        'add_env': {'B': '2'},
+        'delete_env': ('C',),
     }
 
     run('python -c pass', **kwargs)
@@ -397,3 +454,13 @@ def test_suby_exceptions_expose_subprocess_result_type() -> None:
         run('python -c pass')
     except ConditionCancellationError as error:
         reveal_type(error.result)  # R: suby.subprocess_result.SubprocessResult
+
+
+@pytest.mark.mypy_testing
+def test_environment_variables_conflict_is_importable_and_is_value_error() -> None:
+    """The environment-conflict exception is exported from both the package root and the errors module."""
+    root_error: ValueError = EnvironmentVariablesConflict('conflict')
+    module_error: ValueError = ModuleEnvironmentVariablesConflict('conflict')
+
+    raise root_error
+    raise module_error

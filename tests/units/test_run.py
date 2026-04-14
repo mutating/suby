@@ -1,16 +1,19 @@
 import importlib
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+from collections import OrderedDict, UserDict
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from os import environ
 from pathlib import Path, PurePath
 from threading import Event, Thread
 from time import perf_counter
+from types import MappingProxyType
 from typing import Any, List, cast
 from unittest.mock import patch
 
@@ -28,7 +31,12 @@ from emptylog import MemoryLogger
 from full_match import match
 
 import suby
-from suby import RunningCommandError, WrongCommandError, run
+from suby import (
+    EnvironmentVariablesConflict,
+    RunningCommandError,
+    WrongCommandError,
+    run,
+)
 from suby.subprocess_result import SubprocessResult
 
 _run_module = importlib.import_module('suby.run')
@@ -75,6 +83,18 @@ def _load_run_module_with_default_system(system_name: str):
         sys.modules.pop(module_name, None)
 
     return module
+
+
+def _read_child_environment(*names: str, **run_kwargs: Any) -> dict:
+    script = (
+        'import json, os; '
+        f'names = {list(names)!r}; '
+        'print(json.dumps({name: os.environ.get(name) for name in names}, sort_keys=True))'
+    )
+    result = run(sys.executable, '-c', script, split=False, catch_output=True, **run_kwargs)
+
+    assert result.stdout is not None
+    return json.loads(result.stdout)
 
 
 @pytest.mark.parametrize(
@@ -534,6 +554,407 @@ def test_envs_for_subprocess_are_same_as_parent():
     parent_env.pop('COLUMNS', None)
 
     assert subprocess_env == parent_env
+
+
+@pytest.mark.parametrize(
+    ('env', 'add_env', 'delete_env', 'expected'),
+    [
+        (None, None, None, None),
+        (None, {}, None, None),
+        (None, None, [], None),
+        (None, None, (), None),
+        ({}, None, None, {}),
+        ({}, None, [], {}),
+        ({}, None, ['ABSENT'], {}),
+        ({'BASE': 'base'}, {'BASE': 'override', 'NEW': 'new'}, None, {'BASE': 'override', 'NEW': 'new'}),
+        ({'BASE': 'base'}, None, ['ABSENT'], {'BASE': 'base'}),
+    ],
+)
+def test_build_subprocess_env_base_overlay_and_delete_cases(env, add_env, delete_env, expected):
+    """build_subprocess_env() implements the core env/add_env/delete_env precedence rules."""
+    with patch.object(_run_module.os, 'environ', {'PARENT': 'parent'}):
+        result = _run_module.build_subprocess_env(env, add_env, delete_env)
+
+    assert result == expected
+
+
+def test_build_subprocess_env_add_env_uses_parent_copy_when_env_is_none():
+    """add_env without env overlays a copy of the current process environment."""
+    with patch.object(_run_module.os, 'environ', {'PARENT': 'parent'}):
+        result = _run_module.build_subprocess_env(None, {'NEW': 'new'}, [])
+
+    assert result == {'PARENT': 'parent', 'NEW': 'new'}
+
+
+def test_build_subprocess_env_delete_env_uses_parent_copy_when_env_is_none():
+    """delete_env without env starts from the current process environment and removes matching variables."""
+    with patch.object(_run_module.os, 'environ', {'KEEP': 'keep', 'DROP': 'drop'}):
+        result = _run_module.build_subprocess_env(None, None, ['DROP', 'DROP', 'ABSENT'])
+
+    assert result == {'KEEP': 'keep'}
+
+
+def test_build_subprocess_env_does_not_mutate_inputs():
+    """The helper always returns a new mapping and leaves all input containers unchanged."""
+    env = {'BASE': 'base', 'DROP': 'drop'}
+    add_env = {'BASE': 'override'}
+    delete_env = ['ABSENT']
+
+    result = _run_module.build_subprocess_env(env, add_env, delete_env)
+
+    assert result == {'BASE': 'override', 'DROP': 'drop'}
+    assert env == {'BASE': 'base', 'DROP': 'drop'}
+    assert add_env == {'BASE': 'override'}
+    assert delete_env == ['ABSENT']
+
+
+@pytest.mark.parametrize(
+    'mapping_factory',
+    [
+        OrderedDict,
+        UserDict,
+        MappingProxyType,
+    ],
+)
+def test_build_subprocess_env_returns_plain_dict_for_mapping_inputs(mapping_factory):
+    """Mapping subclasses are accepted, but the prepared environment is always a plain dict copy."""
+    source = mapping_factory({'VALUE': '1'})
+
+    result = _run_module.build_subprocess_env(source, None, None)
+
+    assert result == {'VALUE': '1'}
+    assert type(result) is dict
+    assert result is not source
+
+
+def test_build_subprocess_env_snapshots_os_environ(monkeypatch):
+    """Passing os.environ explicitly snapshots it at helper-call time."""
+    key = 'SUBY_ENV_SNAPSHOT'
+    later_key = 'SUBY_ENV_SNAPSHOT_LATER'
+    monkeypatch.setenv(key, 'before')
+    monkeypatch.delenv(later_key, raising=False)
+
+    result = _run_module.build_subprocess_env(os.environ, None, None)
+    monkeypatch.setenv(later_key, 'after')
+
+    assert type(result) is dict
+    assert result[key] == 'before'
+    assert later_key not in result
+    assert result is not os.environ
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'exception_message'),
+    [
+        ({'env': []}, 'env must be a mapping of str to str, got list.'),
+        ({'add_env': []}, 'add_env must be a mapping of str to str, got list.'),
+        ({'env': {1: 'value'}}, 'env keys must be str, got 1 (int).'),
+        ({'add_env': {1: 'value'}}, 'add_env keys must be str, got 1 (int).'),
+        ({'env': {'KEY': 1}}, "env values must be str, got 1 (int) for key 'KEY'."),
+        ({'add_env': {'KEY': 1}}, "add_env values must be str, got 1 (int) for key 'KEY'."),
+        ({'env': {'KEY=BAD': 'value'}}, "env keys must not contain '=' or null bytes, got 'KEY=BAD'."),
+        ({'add_env': {'KEY=BAD': 'value'}}, "add_env keys must not contain '=' or null bytes, got 'KEY=BAD'."),
+        ({'env': {'KEY\x00BAD': 'value'}}, "env keys must not contain '=' or null bytes, got 'KEY\\x00BAD'."),
+        ({'add_env': {'KEY\x00BAD': 'value'}}, "add_env keys must not contain '=' or null bytes, got 'KEY\\x00BAD'."),
+        ({'env': {'KEY': 'bad\x00value'}}, "env values must not contain null bytes, got 'bad\\x00value' for key 'KEY'."),
+        ({'add_env': {'KEY': 'bad\x00value'}}, "add_env values must not contain null bytes, got 'bad\\x00value' for key 'KEY'."),
+        ({'delete_env': 'KEY'}, 'delete_env must be a list or tuple of str, got str.'),
+        ({'delete_env': {'KEY'}}, 'delete_env must be a list or tuple of str, got set.'),
+        ({'delete_env': [1]}, 'delete_env items must be str, got 1 (int).'),
+        ({'delete_env': ['KEY=BAD']}, "delete_env items must not contain '=' or null bytes, got 'KEY=BAD'."),
+        ({'delete_env': ['KEY\x00BAD']}, "delete_env items must not contain '=' or null bytes, got 'KEY\\x00BAD'."),
+    ],
+)
+def test_build_subprocess_env_rejects_invalid_environment_arguments(kwargs, exception_message):
+    """Invalid environment containers and non-string names/values fail before any subprocess starts."""
+    with pytest.raises(TypeError, match=match(exception_message)):
+        _run_module.build_subprocess_env(**{'env': None, 'add_env': None, 'delete_env': None, **kwargs})
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'exception_message'),
+    [
+        (
+            {'env': {'A': '1'}, 'delete_env': ['A']},
+            'Environment variables cannot be both set via env/add_env and deleted via delete_env: A.',
+        ),
+        (
+            {'add_env': {'A': '1'}, 'delete_env': ['A']},
+            'Environment variables cannot be both set via env/add_env and deleted via delete_env: A.',
+        ),
+        (
+            {'env': {'A': '1'}, 'add_env': {'B': '2'}, 'delete_env': ['B', 'A']},
+            'Environment variables cannot be both set via env/add_env and deleted via delete_env: B, A.',
+        ),
+    ],
+)
+def test_build_subprocess_env_rejects_explicit_set_delete_conflicts(kwargs, exception_message):
+    """delete_env cannot name variables that env or add_env explicitly sets."""
+    with pytest.raises(EnvironmentVariablesConflict, match=match(exception_message)):
+        _run_module.build_subprocess_env(**{'env': None, 'add_env': None, 'delete_env': None, **kwargs})
+
+
+def test_build_subprocess_env_rejects_add_env_delete_env_conflict_when_env_is_none():
+    """add_env remains explicit even when the base environment is inherited from os.environ."""
+    with pytest.raises(
+        EnvironmentVariablesConflict,
+        match=match('Environment variables cannot be both set via env/add_env and deleted via delete_env: VAR.'),
+    ):
+        _run_module.build_subprocess_env(None, {'VAR': 'value'}, ['VAR'])
+
+
+def test_build_subprocess_env_uses_case_insensitive_names_on_windows():
+    """On Windows, environment names are normalized to uppercase and later values win."""
+    with patch.object(_run_module, 'system', return_value='Windows'):
+        assert _run_module.build_subprocess_env({'PATH': 'x', 'Path': 'y'}, None, None) == {'PATH': 'y'}
+        assert _run_module.build_subprocess_env({'Path': 'x'}, {'path': 'y'}, None) == {'PATH': 'y'}
+        with patch.object(_run_module.os, 'environ', {'Path': 'x', 'KEEP': 'keep'}):
+            assert _run_module.build_subprocess_env(None, None, ['PATH', 'Path']) == {'KEEP': 'keep'}
+
+
+def test_build_subprocess_env_reports_windows_conflicts_case_insensitively():
+    """On Windows, delete_env conflicts use case-insensitive names and collapse duplicate delete requests."""
+    with patch.object(_run_module, 'system', return_value='Windows'):
+        with pytest.raises(
+            EnvironmentVariablesConflict,
+            match=match('Environment variables cannot be both set via env/add_env and deleted via delete_env: path.'),
+        ):
+            _run_module.build_subprocess_env({'PATH': 'x'}, None, ['path', 'PATH'])
+
+        with pytest.raises(
+            EnvironmentVariablesConflict,
+            match=match('Environment variables cannot be both set via env/add_env and deleted via delete_env: PATH.'),
+        ):
+            _run_module.build_subprocess_env(None, {'path': 'x'}, ['PATH'])
+
+
+def test_build_subprocess_env_uses_case_sensitive_names_on_posix():
+    """On non-Windows platforms, differently cased names remain distinct."""
+    with patch.object(_run_module, 'system', return_value='Linux'):
+        assert _run_module.build_subprocess_env({'Path': 'x'}, None, ['PATH']) == {'Path': 'x'}
+        with patch.object(_run_module.os, 'environ', {'PATH': 'x', 'Path': 'y'}):
+            assert _run_module.build_subprocess_env(None, None, ['PATH', 'PATH']) == {'Path': 'y'}
+
+        with pytest.raises(
+            EnvironmentVariablesConflict,
+            match=match('Environment variables cannot be both set via env/add_env and deleted via delete_env: PATH, Path.'),
+        ):
+            _run_module.build_subprocess_env({'PATH': 'x', 'Path': 'y'}, None, ['PATH', 'Path'])
+
+
+def test_run_does_not_pass_env_to_popen_when_environment_arguments_are_empty():
+    """Empty environment controls preserve the exact old Popen call shape with no env kwarg."""
+    with patch.object(_run_module, 'Popen', side_effect=FileNotFoundError('mocked missing command')) as mock_popen:
+        run('python -c pass', catch_exceptions=True, add_env={}, delete_env=[])
+
+    assert 'env' not in mock_popen.call_args.kwargs
+
+
+def test_run_passes_empty_env_to_popen_when_env_is_explicitly_empty():
+    """env={} is an explicit empty environment, not the same as omitting env."""
+    with patch.object(_run_module, 'Popen', side_effect=FileNotFoundError('mocked missing command')) as mock_popen:
+        run('python -c pass', catch_exceptions=True, env={})
+
+    assert mock_popen.call_args.kwargs['env'] == {}
+
+
+def test_run_passes_env_to_popen_without_changing_existing_popen_options(assert_no_suby_thread_leaks):
+    """Adding env preserves the existing Popen text pipes and buffering options."""
+    child_env = dict(environ)
+    child_env['SUBY_POPEN_ENV_SENTINEL'] = '1'
+
+    with assert_no_suby_thread_leaks(), \
+         patch.object(_run_module, 'Popen', wraps=_run_module.Popen) as mock_popen:
+        result = run(sys.executable, '-c', 'pass', split=False, catch_output=True, env=child_env)
+
+    mock_popen.assert_called_once_with(
+        [sys.executable, '-c', 'pass'],
+        stdout=_run_module.PIPE,
+        stderr=_run_module.PIPE,
+        bufsize=1,
+        text=True,
+        encoding='utf-8',
+        errors='strict',
+        env=child_env,
+    )
+    assert result.returncode == 0
+
+
+def test_run_add_env_inherits_overrides_and_does_not_mutate_parent(monkeypatch):
+    """add_env combines the current process environment with explicit overrides without mutating os.environ."""
+    inherited_key = 'SUBY_INHERITED_ENV'
+    override_key = 'SUBY_OVERRIDE_ENV'
+    added_key = 'SUBY_ADDED_ENV'
+    monkeypatch.setenv(inherited_key, 'parent')
+    monkeypatch.setenv(override_key, 'parent')
+    monkeypatch.delenv(added_key, raising=False)
+
+    parent_before = dict(os.environ)
+    child_env = _read_child_environment(
+        inherited_key,
+        override_key,
+        added_key,
+        add_env={override_key: 'child', added_key: 'child'},
+        delete_env=[],
+    )
+
+    assert child_env == {
+        inherited_key: 'parent',
+        override_key: 'child',
+        added_key: 'child',
+    }
+    assert dict(os.environ) == parent_before
+
+
+def test_run_delete_env_removes_inherited_variables_and_ignores_absent_names(monkeypatch):
+    """delete_env removes inherited variables from the child environment and leaves os.environ unchanged."""
+    deleted_key = 'SUBY_DELETED_ENV'
+    missing_key = 'SUBY_MISSING_ENV'
+    kept_key = 'SUBY_KEPT_ENV'
+    monkeypatch.setenv(deleted_key, 'delete-me')
+    monkeypatch.setenv(kept_key, 'keep-me')
+    monkeypatch.delenv(missing_key, raising=False)
+
+    parent_before = dict(os.environ)
+    child_env = _read_child_environment(
+        deleted_key,
+        missing_key,
+        kept_key,
+        delete_env=[deleted_key, missing_key],
+    )
+
+    assert child_env == {
+        deleted_key: None,
+        missing_key: None,
+        kept_key: 'keep-me',
+    }
+    assert dict(os.environ) == parent_before
+
+
+def test_run_add_env_and_delete_env_are_applied_in_order(monkeypatch):
+    """add_env overlays inherited values, then delete_env removes inherited non-explicit names."""
+    added_key = 'SUBY_ADDED_ORDER_ENV'
+    override_key = 'SUBY_OVERRIDE_ORDER_ENV'
+    inherited_drop_key = 'SUBY_INHERITED_DROP_ENV'
+    parent_only_key = 'SUBY_PARENT_ONLY_ENV'
+    monkeypatch.delenv(added_key, raising=False)
+    monkeypatch.setenv(override_key, 'parent')
+    monkeypatch.setenv(inherited_drop_key, 'drop')
+    monkeypatch.setenv(parent_only_key, 'parent')
+
+    parent_before = dict(os.environ)
+    child_env = _read_child_environment(
+        added_key,
+        override_key,
+        inherited_drop_key,
+        parent_only_key,
+        add_env={added_key: 'add', override_key: 'add'},
+        delete_env=[inherited_drop_key],
+    )
+
+    assert child_env == {
+        added_key: 'add',
+        override_key: 'add',
+        inherited_drop_key: None,
+        parent_only_key: 'parent',
+    }
+    assert dict(os.environ) == parent_before
+
+
+def test_run_env_exact_mapping_does_not_leak_parent_variables(monkeypatch):
+    """env supplies the exact child environment instead of extending os.environ."""
+    explicit_key = 'SUBY_EXACT_ENV'
+    parent_only_key = 'SUBY_PARENT_ONLY_EXACT_ENV'
+    monkeypatch.setenv(parent_only_key, 'parent')
+
+    child_env = dict(os.environ)
+    child_env[explicit_key] = 'child'
+    child_env.pop(parent_only_key, None)
+
+    assert _read_child_environment(explicit_key, parent_only_key, env=child_env) == {
+        explicit_key: 'child',
+        parent_only_key: None,
+    }
+
+
+def test_run_env_snapshot_passed_to_popen_is_not_later_os_environ():
+    """When env=os.environ is passed, Popen receives a plain dict snapshot rather than os.environ itself."""
+    with patch.object(_run_module, 'Popen', side_effect=FileNotFoundError('mocked missing command')) as mock_popen:
+        run('python -c pass', catch_exceptions=True, env=os.environ)
+
+    captured_env = mock_popen.call_args.kwargs['env']
+    assert type(captured_env) is dict
+    assert captured_env is not os.environ
+
+
+def test_run_add_env_accepts_os_environ_and_passes_snapshot_to_popen(monkeypatch):
+    """add_env=os.environ is accepted and copied into the child environment."""
+    key = 'SUBY_ADD_ENV_OS_ENVIRON'
+    monkeypatch.setenv(key, 'from-parent')
+
+    with patch.object(_run_module, 'Popen', side_effect=FileNotFoundError('mocked missing command')) as mock_popen:
+        run('python -c pass', catch_exceptions=True, add_env=os.environ)
+
+    captured_env = mock_popen.call_args.kwargs['env']
+    assert type(captured_env) is dict
+    assert captured_env is not os.environ
+    assert captured_env[key] == 'from-parent'
+
+
+def test_run_environment_arguments_do_not_mutate_input_containers():
+    """run() prepares a separate child env without changing env, add_env, or delete_env inputs."""
+    env = dict(os.environ)
+    env['SUBY_INPUT_ENV_BASE'] = 'base'
+    env['SUBY_INPUT_ENV_DROP'] = 'drop'
+    add_env = {'SUBY_INPUT_ENV_BASE': 'override', 'SUBY_INPUT_ENV_NEW': 'new'}
+    delete_env = ['SUBY_INPUT_ENV_ABSENT']
+    original_env = dict(env)
+    original_add_env = dict(add_env)
+    original_delete_env = list(delete_env)
+
+    child_env = _read_child_environment(
+        'SUBY_INPUT_ENV_BASE',
+        'SUBY_INPUT_ENV_NEW',
+        'SUBY_INPUT_ENV_DROP',
+        env=env,
+        add_env=add_env,
+        delete_env=delete_env,
+    )
+
+    assert child_env == {
+        'SUBY_INPUT_ENV_BASE': 'override',
+        'SUBY_INPUT_ENV_NEW': 'new',
+        'SUBY_INPUT_ENV_DROP': 'drop',
+    }
+    assert env == original_env
+    assert add_env == original_add_env
+    assert delete_env == original_delete_env
+
+
+def test_run_delete_env_does_not_mutate_add_env(monkeypatch):
+    """delete_env can remove inherited variables without changing the add_env mapping."""
+    deleted_key = 'SUBY_DELETE_WITH_ADD_ENV_DROP'
+    added_key = 'SUBY_DELETE_WITH_ADD_ENV_NEW'
+    monkeypatch.setenv(deleted_key, 'drop')
+    monkeypatch.delenv(added_key, raising=False)
+    add_env = {added_key: 'new'}
+    delete_env = [deleted_key]
+    original_add_env = dict(add_env)
+    original_delete_env = list(delete_env)
+
+    child_env = _read_child_environment(
+        deleted_key,
+        added_key,
+        add_env=add_env,
+        delete_env=delete_env,
+    )
+
+    assert child_env == {
+        deleted_key: None,
+        added_key: 'new',
+    }
+    assert add_env == original_add_env
+    assert delete_env == original_delete_env
 
 
 def test_executable_path_with_backslashes_passed_as_string():
