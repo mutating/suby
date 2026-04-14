@@ -20,3 +20,4 @@ planning_features.md
 coverage.xml
 .qwen
 uv.lock
+.codspeed
