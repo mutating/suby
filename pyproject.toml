@@ -15,6 +15,7 @@ dependencies = [
     'emptylog>=0.0.12',
     'cantok>=0.0.36',
     'microbenchmark>=0.0.2',
+    'sigmatch>=0.0.9',
 ]
 classifiers = [
     "Operating System :: OS Independent",
