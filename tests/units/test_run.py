@@ -8,6 +8,7 @@ import sys
 import time
 from collections import OrderedDict, UserDict
 from contextlib import redirect_stderr, redirect_stdout
+from functools import partial
 from io import StringIO
 from os import environ
 from pathlib import Path, PurePath
@@ -29,6 +30,7 @@ from cantok import (
 )
 from emptylog import MemoryLogger
 from full_match import match
+from sigmatch import SignatureMismatchError
 
 import suby
 from suby import (
@@ -2432,9 +2434,177 @@ def test_callback_that_prints_does_not_deadlock():
     ],
 )
 def test_callbacks_must_be_callable(run_kwargs, command):
-    """stdout_callback and stderr_callback must be callable objects, otherwise run() raises TypeError."""
-    with pytest.raises(TypeError):
+    """stdout_callback and stderr_callback must be callable objects, otherwise run() raises SignatureMismatchError."""
+    with pytest.raises(SignatureMismatchError, match='callback\\(line\\)'):
         run(sys.executable, '-c', command, split=False, **run_kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ('parameter_name', 'callback_factory'),
+    [
+        pytest.param('stdout_callback', lambda: _valid_one_required_callback, id='stdout one required line'),
+        pytest.param('stderr_callback', lambda: _valid_one_required_callback, id='stderr one required line'),
+        pytest.param('stdout_callback', lambda: _valid_optional_line_callback, id='stdout optional line'),
+        pytest.param('stderr_callback', lambda: _valid_optional_line_callback, id='stderr optional line'),
+        pytest.param('stdout_callback', lambda: _valid_optional_positional_callback, id='stdout optional positional'),
+        pytest.param('stderr_callback', lambda: _valid_optional_positional_callback, id='stderr optional positional'),
+        pytest.param('stdout_callback', lambda: _valid_optional_keyword_only_callback, id='stdout optional keyword-only'),
+        pytest.param('stderr_callback', lambda: _valid_optional_keyword_only_callback, id='stderr optional keyword-only'),
+        pytest.param('stdout_callback', lambda: _valid_varargs_callback, id='stdout varargs'),
+        pytest.param('stderr_callback', lambda: _valid_varargs_callback, id='stderr varargs'),
+        pytest.param('stdout_callback', lambda: _positional_only_callback, id='stdout positional-only'),
+        pytest.param('stderr_callback', lambda: _positional_only_callback, id='stderr positional-only'),
+        pytest.param('stdout_callback', lambda: _CallableCallback(), id='stdout callable instance'),
+        pytest.param('stderr_callback', lambda: _CallableCallback(), id='stderr callable instance'),
+        pytest.param('stdout_callback', lambda: partial(_callback_target_with_one_slot), id='stdout partial unchanged'),
+        pytest.param('stderr_callback', lambda: partial(_callback_target_with_one_slot), id='stderr partial unchanged'),
+        pytest.param('stdout_callback', lambda: partial(_callback_target_with_optional_extra, extra='fixed'), id='stdout partial keyword'),
+        pytest.param('stderr_callback', lambda: partial(_callback_target_with_optional_extra, extra='fixed'), id='stderr partial keyword'),
+        pytest.param('stdout_callback', lambda: partial(_callback_target_with_two_slots, 'fixed'), id='stdout partial leaves slot'),
+        pytest.param('stderr_callback', lambda: partial(_callback_target_with_two_slots, 'fixed'), id='stderr partial leaves slot'),
+    ],
+)
+def test_check_output_stream_callback_accepts_valid_callbacks(parameter_name, callback_factory):
+    """Runtime callback validation accepts callables that can be invoked as callback(line)."""
+    _run_module.check_output_stream_callback(parameter_name, callback_factory())
+
+
+def _positional_only_callback(line, /):
+    _ = line
+
+
+def _valid_one_required_callback(line):
+    return line
+
+
+def _valid_optional_line_callback(line='fallback'):
+    return line
+
+
+def _valid_optional_positional_callback(line, extra='fallback'):
+    return line, extra
+
+
+def _valid_optional_keyword_only_callback(line, *, extra='fallback'):
+    return line, extra
+
+
+def _valid_varargs_callback(*lines):
+    return lines
+
+
+class _CallableCallback:
+    def __call__(self, line):
+        _ = line
+
+
+class _CallableCallbackClass:
+    def __init__(self, line):
+        self.line = line
+
+
+def _callback_target_with_one_slot(line):
+    _ = line
+
+
+def _callback_target_with_optional_extra(line, extra=None):
+    _ = line, extra
+
+
+def _callback_target_with_two_slots(_fixed, line):
+    _ = line
+
+
+@pytest.mark.parametrize(
+    ('parameter_name', 'callback_factory', 'message_fragment'),
+    [
+        pytest.param('stdout_callback', lambda: None, 'stdout_callback', id='stdout none'),
+        pytest.param('stderr_callback', lambda: 123, 'stderr_callback', id='stderr int'),
+        pytest.param('stdout_callback', lambda: (lambda: None), 'stdout_callback', id='stdout no args'),
+        pytest.param('stderr_callback', lambda: (lambda: None), 'stderr_callback', id='stderr no args'),
+        pytest.param('stdout_callback', lambda: _invalid_required_extra_callback, 'stdout_callback', id='stdout required extra positional'),
+        pytest.param('stderr_callback', lambda: _invalid_required_extra_callback, 'stderr_callback', id='stderr required extra positional'),
+        pytest.param('stdout_callback', lambda: _invalid_keyword_only_line_callback, 'stdout_callback', id='stdout keyword-only line'),
+        pytest.param('stderr_callback', lambda: _invalid_keyword_only_line_callback, 'stderr_callback', id='stderr keyword-only line'),
+        pytest.param('stdout_callback', lambda: _invalid_required_keyword_only_callback, 'stdout_callback', id='stdout required keyword-only'),
+        pytest.param('stderr_callback', lambda: _invalid_required_keyword_only_callback, 'stderr_callback', id='stderr required keyword-only'),
+        pytest.param('stdout_callback', lambda: _InvalidCallableCallback(), 'stdout_callback', id='stdout invalid callable instance'),
+        pytest.param('stderr_callback', lambda: _InvalidCallableCallback(), 'stderr_callback', id='stderr invalid callable instance'),
+        pytest.param('stdout_callback', lambda: _CallableCallbackClass, 'callback classes are not supported', id='stdout callback class'),
+        pytest.param('stderr_callback', lambda: _CallableCallbackClass, 'callback classes are not supported', id='stderr callback class'),
+        pytest.param('stdout_callback', lambda: _InvalidCallableCallbackClass, 'callback classes are not supported', id='stdout invalid callback class'),
+        pytest.param('stderr_callback', lambda: _InvalidCallableCallbackClass, 'callback classes are not supported', id='stderr invalid callback class'),
+        pytest.param('stdout_callback', lambda: partial(_CallableCallbackClass), 'callback classes are not supported', id='stdout partial callback class'),
+        pytest.param('stderr_callback', lambda: partial(_CallableCallbackClass), 'callback classes are not supported', id='stderr partial callback class'),
+        pytest.param('stdout_callback', lambda: _async_callback, 'async callbacks are not supported', id='stdout async function'),
+        pytest.param('stderr_callback', lambda: partial(_async_callback), 'async callbacks are not supported', id='stderr async partial'),
+        pytest.param('stdout_callback', lambda: partial(partial(_async_callback)), 'async callbacks are not supported', id='stdout nested async partial'),
+        pytest.param('stderr_callback', lambda: partial(_async_callback_with_optional_extra, extra='fixed'), 'async callbacks are not supported', id='stderr async keyword partial'),
+        pytest.param('stdout_callback', lambda: _AsyncCallableCallback(), 'async callbacks are not supported', id='stdout async callable instance'),
+        pytest.param('stderr_callback', lambda: partial(_AsyncCallableCallback()), 'async callbacks are not supported', id='stderr async callable partial'),
+        pytest.param('stdout_callback', lambda: _async_generator_callback, 'generator callbacks are not supported', id='stdout async generator function'),
+        pytest.param('stderr_callback', lambda: _generator_callback, 'generator callbacks are not supported', id='stderr generator function'),
+        pytest.param('stdout_callback', lambda: _GeneratorCallableCallback(), 'generator callbacks are not supported', id='stdout generator callable instance'),
+        pytest.param('stderr_callback', lambda: partial(_generator_callback), 'generator callbacks are not supported', id='stderr generator partial'),
+        pytest.param('stdout_callback', lambda: partial(_callback_target_with_one_slot, 'already-bound'), 'stdout_callback', id='stdout partial no slots'),
+        pytest.param('stderr_callback', lambda: partial(_callback_target_with_one_slot, 'already-bound'), 'stderr_callback', id='stderr partial no slots'),
+    ],
+)
+def test_check_output_stream_callback_rejects_invalid_callbacks(parameter_name, callback_factory, message_fragment):
+    """Runtime callback validation rejects values that cannot be safely used by stream readers."""
+    with pytest.raises(SignatureMismatchError, match=re.escape(message_fragment)) as exc_info:
+        _run_module.check_output_stream_callback(parameter_name, callback_factory())
+
+    assert parameter_name in str(exc_info.value)
+    assert 'callback(line)' in str(exc_info.value)
+
+
+class _InvalidCallableCallback:
+    def __call__(self):
+        return None
+
+
+def _invalid_required_extra_callback(line, extra):
+    return line, extra
+
+
+def _invalid_keyword_only_line_callback(*, line):
+    return line
+
+
+def _invalid_required_keyword_only_callback(line, *, required):
+    return line, required
+
+
+class _InvalidCallableCallbackClass:
+    def __init__(self):
+        pass
+
+
+async def _async_callback(line):
+    _ = line
+
+
+async def _async_callback_with_optional_extra(line, extra=None):
+    _ = line, extra
+
+
+class _AsyncCallableCallback:
+    async def __call__(self, line):
+        _ = line
+
+
+async def _async_generator_callback(line):
+    yield line
+
+
+def _generator_callback(line):
+    yield line
+
+
+class _GeneratorCallableCallback:
+    def __call__(self, line):
+        yield line
 
 
 @pytest.mark.parametrize(
@@ -2454,34 +2624,83 @@ def test_callbacks_must_be_callable(run_kwargs, command):
         ),
     ],
 )
-def test_catch_output_true_bypasses_callbacks_entirely(
+def test_catch_output_true_calls_custom_callbacks_without_console_forwarding(
     callback_kwarg,
     command,
     expected_stdout,
     expected_stderr,
     assert_no_suby_thread_leaks,
 ):
-    """With catch_output=True, custom callbacks are bypassed entirely and output is only stored in the result."""
+    """catch_output=True suppresses default printing but still delivers lines to custom callbacks."""
     seen: List[str] = []
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
 
-    def callback(text: str) -> None:
-        seen.append(text)
-        raise RuntimeError('callback should not be called')
-
-    with assert_no_suby_thread_leaks():
+    with assert_no_suby_thread_leaks(), redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
         result = run(
             sys.executable,
             '-c',
             command,
             split=False,
             catch_output=True,
-            catch_exceptions=True,
-            **{callback_kwarg: callback},
+            **{callback_kwarg: seen.append},
         )
 
-    assert seen == []
+    assert seen == [expected_stdout or expected_stderr]
+    assert stdout_buffer.getvalue() == ''
+    assert stderr_buffer.getvalue() == ''
     assert result.stdout == expected_stdout
     assert result.stderr == expected_stderr
+
+
+def test_catch_output_true_calls_both_custom_callbacks_without_console_forwarding(assert_no_suby_thread_leaks):
+    """Both custom stream callbacks still run in capture mode while result buffering remains intact."""
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
+
+    with assert_no_suby_thread_leaks(), redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+        result = run(
+            sys.executable,
+            '-c',
+            'import sys; print("out"); sys.stderr.write("err\\n")',
+            split=False,
+            catch_output=True,
+            stdout_callback=stdout_lines.append,
+            stderr_callback=stderr_lines.append,
+        )
+
+    assert stdout_lines == ['out\n']
+    assert stderr_lines == ['err\n']
+    assert stdout_buffer.getvalue() == ''
+    assert stderr_buffer.getvalue() == ''
+    assert result.stdout == 'out\n'
+    assert result.stderr == 'err\n'
+
+
+def test_invalid_callbacks_are_rejected_before_process_or_threads_start():
+    """Invalid callback signatures are rejected before subprocess startup and reader thread creation."""
+    with patch.object(_run_module, 'Popen', side_effect=AssertionError('Popen should not be called')), \
+         patch.object(_run_module, 'Thread', side_effect=AssertionError('Thread should not be created')), \
+         pytest.raises(SignatureMismatchError, match='stdout_callback'):
+        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=lambda: None)
+
+
+def test_invalid_callbacks_are_rejected_before_process_or_threads_start_with_catch_output():
+    """catch_output=True does not defer or skip callback validation."""
+    with patch.object(_run_module, 'Popen', side_effect=AssertionError('Popen should not be called')), \
+         patch.object(_run_module, 'Thread', side_effect=AssertionError('Thread should not be created')), \
+         pytest.raises(SignatureMismatchError, match='stderr_callback'):
+        run(sys.executable, '-c', 'print("hello")', split=False, catch_output=True, stderr_callback=lambda: None)
+
+
+def test_stdout_callback_validation_wins_when_both_callbacks_are_invalid():
+    """stdout_callback is validated first, so it determines the error when both callbacks are invalid."""
+    with pytest.raises(SignatureMismatchError, match='stdout_callback') as exc_info:
+        run(sys.executable, '-c', 'print("hello")', split=False, stdout_callback=lambda: None, stderr_callback=lambda: None)
+
+    assert 'stderr_callback' not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
