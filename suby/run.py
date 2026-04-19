@@ -274,7 +274,7 @@ def check_output_stream_callback(parameter_name: str, callback: Any) -> None:  #
     def build_message(reason: str) -> str:
         return (
             f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '  # type: ignore[misc, unused-ignore]
-            f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'  # type: ignore[misc]
+            f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'  # type: ignore[misc, unused-ignore]
         )
 
     if not callable(callback):  # type: ignore[misc]
