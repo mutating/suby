@@ -270,38 +270,39 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     return shlex_split(argument)
 
 
-def check_output_stream_callback(parameter_name: str, callback: StreamCallback) -> None:
+def check_output_stream_callback(parameter_name: str, callback: Any) -> None:  # type: ignore[misc]
     def build_message(reason: str) -> str:
         return (
-            f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '
-            f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'
+            f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '  # type: ignore[misc]
+            f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'  # type: ignore[misc]
         )
 
-    if not callable(callback):
+    if not callable(callback):  # type: ignore[misc]
         raise SignatureMismatchError(build_message('The value is not callable.'))
 
-    inspected_callback = callback
-    while isinstance(inspected_callback, partial):
-        inspected_callback = inspected_callback.func
+    inspected_callback = callback  # type: ignore[misc]
+    partial_type: type[object] = type(partial(len))
+    while isinstance(inspected_callback, partial_type):  # type: ignore[misc]
+        inspected_callback = object.__getattribute__(inspected_callback, 'func')  # type: ignore[misc]
 
-    if isclass(inspected_callback):
+    if isclass(inspected_callback):  # type: ignore[misc]
         raise SignatureMismatchError(build_message('callback classes are not supported; pass a function or a callable instance instead.'))
 
     try:
-        inspected_call = object.__getattribute__(inspected_callback, '__call__')
+        inspected_call = object.__getattribute__(inspected_callback, '__call__')  # type: ignore[misc]
     except AttributeError:
         inspected_call = None
-    for inspected in (inspected_callback, inspected_call):
-        if inspected is None:
+    for inspected in (inspected_callback, inspected_call):  # type: ignore[misc]
+        if inspected is None:  # type: ignore[misc]
             continue
-        if iscoroutinefunction(inspected):
+        if iscoroutinefunction(inspected):  # type: ignore[misc]
             raise SignatureMismatchError(build_message('async callbacks are not supported because suby invokes stream callbacks synchronously.'))
-        if isasyncgenfunction(inspected):
+        if isasyncgenfunction(inspected):  # type: ignore[misc]
             raise SignatureMismatchError(build_message('async generator callbacks are not supported because suby invokes stream callbacks synchronously and ignores callback return values.'))
-        if isgeneratorfunction(inspected):
+        if isgeneratorfunction(inspected):  # type: ignore[misc]
             raise SignatureMismatchError(build_message('generator callbacks are not supported because suby invokes stream callbacks synchronously and ignores callback return values.'))
 
-    if not STREAM_CALLBACK_MATCHER.match(callback, raise_exception=False):
+    if not STREAM_CALLBACK_MATCHER.match(callback, raise_exception=False):  # type: ignore[misc]
         raise SignatureMismatchError(build_message('The callable signature does not accept one positional output line.'))
 
 
