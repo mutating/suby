@@ -14,7 +14,7 @@ from os import environ
 from pathlib import Path, PurePath
 from threading import Event, Thread
 from time import perf_counter
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, List, cast
 from unittest.mock import patch
 
@@ -2557,6 +2557,18 @@ def test_check_output_stream_callback_rejects_invalid_callbacks(parameter_name, 
 
     assert parameter_name in str(exc_info.value)
     assert 'callback(line)' in str(exc_info.value)
+
+
+def test_check_output_stream_callback_skips_call_inspection_when_call_attribute_is_missing(monkeypatch):
+    """Runtime callback validation remains defensive if a callable's direct __call__ lookup is unavailable."""
+    def getattribute(value, name):
+        if name == '__call__':
+            raise AttributeError(name)
+        return object.__getattribute__(value, name)
+
+    monkeypatch.setattr(_run_module, 'object', SimpleNamespace(__getattribute__=getattribute), raising=False)
+
+    _run_module.check_output_stream_callback('stdout_callback', _valid_one_required_callback)
 
 
 class _InvalidCallableCallback:
