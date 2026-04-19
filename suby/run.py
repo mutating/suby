@@ -273,7 +273,7 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
 def check_output_stream_callback(parameter_name: str, callback: Any) -> None:  # type: ignore[misc]
     def build_message(reason: str) -> str:
         return (
-            f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '  # type: ignore[misc]
+            f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '  # type: ignore[misc, unused-ignore]
             f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'  # type: ignore[misc]
         )
 
