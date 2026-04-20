@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suby"
-version = "0.0.7"
+version = "0.0.8"
 authors = [
   { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
 ]
@@ -14,7 +14,8 @@ requires-python = ">=3.8"
 dependencies = [
     'emptylog>=0.0.12',
     'cantok>=0.0.36',
-    'microbenchmark>=0.0.2',
+    'microbenchmark>=0.0.3',
+    'sigmatch>=0.0.9',
 ]
 classifiers = [
     "Operating System :: OS Independent",

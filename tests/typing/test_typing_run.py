@@ -260,14 +260,36 @@ def test_run_rejects_callbacks_with_invalid_signatures() -> None:
     def callback_with_bytes_input(line: bytes) -> None:
         pass
 
+    class CallableCallbackWithoutArguments:
+        def __call__(self) -> None:
+            pass
+
+    class CallableCallbackWithExtraArgument:
+        def __call__(self, line: str, extra: int) -> None:
+            pass
+
+    class CallableCallbackWithBytesInput:
+        def __call__(self, line: bytes) -> None:
+            pass
+
     run('python -c pass', stdout_callback=callback_without_arguments)  # E: [arg-type]
     run('python -c pass', stderr_callback=callback_without_arguments)  # E: [arg-type]
     run('python -c pass', stdout_callback=callback_with_extra_argument)  # E: [arg-type]
     run('python -c pass', stderr_callback=callback_with_extra_argument)  # E: [arg-type]
     run('python -c pass', stdout_callback=callback_with_bytes_input)  # E: [arg-type]
     run('python -c pass', stderr_callback=callback_with_bytes_input)  # E: [arg-type]
+    run('python -c pass', stdout_callback=CallableCallbackWithoutArguments().__call__)  # E: [arg-type]
+    run('python -c pass', stderr_callback=CallableCallbackWithoutArguments().__call__)  # E: [arg-type]
+    run('python -c pass', stdout_callback=CallableCallbackWithExtraArgument().__call__)  # E: [arg-type]
+    run('python -c pass', stderr_callback=CallableCallbackWithExtraArgument().__call__)  # E: [arg-type]
+    run('python -c pass', stdout_callback=CallableCallbackWithBytesInput().__call__)  # E: [arg-type]
+    run('python -c pass', stderr_callback=CallableCallbackWithBytesInput().__call__)  # E: [arg-type]
     run('python -c pass', stdout_callback=None)  # E: [arg-type]
+    run('python -c pass', stderr_callback=None)  # E: [arg-type]
+    run('python -c pass', stdout_callback=123)  # E: [arg-type]
     run('python -c pass', stderr_callback=123)  # E: [arg-type]
+    run('python -c pass', stdout_callback=object())  # E: [arg-type]
+    run('python -c pass', stderr_callback=object())  # E: [arg-type]
 
 
 @pytest.mark.mypy_testing
@@ -472,13 +494,22 @@ def test_run_static_return_type_is_not_changed_by_catch_exceptions() -> None:
 
 @pytest.mark.mypy_testing
 def test_run_known_typing_gaps_are_currently_accepted() -> None:
-    """Current known gaps: mypy still accepts run() with no command args, timeout=True, and async callbacks."""
+    """Current known gaps: mypy still accepts cases that runtime validation rejects."""
     async def async_callback(line: str) -> None:
         pass
+
+    def generator_callback(line: str):
+        yield line
+
+    class CallbackClass:
+        def __init__(self, line: str) -> None:
+            pass
 
     run()
     run('python -c pass', timeout=True)
     run('python -c pass', stdout_callback=async_callback)
+    run('python -c pass', stderr_callback=generator_callback)
+    run('python -c pass', stdout_callback=CallbackClass)
 
 
 @pytest.mark.mypy_testing

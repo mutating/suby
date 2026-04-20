@@ -4,6 +4,13 @@ import os
 import stat
 from collections.abc import Mapping as RuntimeMapping
 from dataclasses import dataclass, field
+from functools import partial
+from inspect import (
+    isasyncgenfunction,
+    isclass,
+    iscoroutinefunction,
+    isgeneratorfunction,
+)
 from math import isfinite
 from pathlib import Path
 from platform import system
@@ -35,6 +42,7 @@ from cantok import (
 from cantok import ConditionCancellationError as CantokConditionCancellationError
 from cantok import TimeoutCancellationError as CantokTimeoutCancellationError
 from emptylog import EmptyLogger, LoggerProtocol
+from sigmatch import PossibleCallMatcher, SignatureMismatchError
 
 from suby.callbacks import stderr_with_flush, stdout_with_flush
 from suby.errors import (
@@ -49,6 +57,7 @@ from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
 StreamCallback = Callable[[str], Any]  # type: ignore[misc, unused-ignore]
+STREAM_CALLBACK_MATCHER = PossibleCallMatcher('.')
 _CUSTOM_TOKEN_POLL_TIMEOUT_SECONDS = 0.0001
 _CANCELLATION_ERROR_TYPES: Mapping[Type[CancellationError], Type[CancellationError]] = {
     CantokConditionCancellationError: ConditionCancellationError,
@@ -142,6 +151,9 @@ def run(  # noqa: PLR0913, PLR0915
         popen_kwargs['env'] = subprocess_env
     if subprocess_directory is not None:
         popen_kwargs['cwd'] = subprocess_directory
+
+    check_output_stream_callback('stdout_callback', stdout_callback)
+    check_output_stream_callback('stderr_callback', stderr_callback)
 
     state = _ExecutionState()
 
@@ -256,6 +268,42 @@ def split_argument(argument: str, double_backslash: bool) -> List[str]:
     if double_backslash:
         argument = argument.replace('\\', '\\\\')
     return shlex_split(argument)
+
+
+def check_output_stream_callback(parameter_name: str, callback: Any) -> None:  # type: ignore[misc]
+    def build_message(reason: str) -> str:
+        return (
+            f'{parameter_name} must be a synchronous, non-generator callable that can be invoked as callback(line), '  # type: ignore[misc, unused-ignore]
+            f'where line is a str output line; got {callback!r} ({type(callback).__name__}). {reason}'  # type: ignore[misc, unused-ignore]
+        )
+
+    if not callable(callback):  # type: ignore[misc]
+        raise SignatureMismatchError(build_message('The value is not callable.'))
+
+    inspected_callback = callback  # type: ignore[misc]
+    partial_type: type[object] = type(partial(len))
+    while isinstance(inspected_callback, partial_type):  # type: ignore[misc]
+        inspected_callback = object.__getattribute__(inspected_callback, 'func')  # type: ignore[misc]
+
+    if isclass(inspected_callback):  # type: ignore[misc]
+        raise SignatureMismatchError(build_message('callback classes are not supported; pass a function or a callable instance instead.'))
+
+    try:
+        inspected_call = object.__getattribute__(inspected_callback, '__call__')  # type: ignore[misc]
+    except AttributeError:
+        inspected_call = None
+    for inspected in (inspected_callback, inspected_call):  # type: ignore[misc]
+        if inspected is None:  # type: ignore[misc]
+            continue
+        if iscoroutinefunction(inspected):  # type: ignore[misc]
+            raise SignatureMismatchError(build_message('async callbacks are not supported because suby invokes stream callbacks synchronously.'))
+        if isasyncgenfunction(inspected):  # type: ignore[misc]
+            raise SignatureMismatchError(build_message('async generator callbacks are not supported because suby invokes stream callbacks synchronously and ignores callback return values.'))
+        if isgeneratorfunction(inspected):  # type: ignore[misc]
+            raise SignatureMismatchError(build_message('generator callbacks are not supported because suby invokes stream callbacks synchronously and ignores callback return values.'))
+
+    if not STREAM_CALLBACK_MATCHER.match(callback, raise_exception=False):  # type: ignore[misc]
+        raise SignatureMismatchError(build_message('The callable signature does not accept one positional output line.'))
 
 
 def prepare_directory(directory: Optional[Union[str, Path]]) -> Optional[str]:
@@ -502,12 +550,18 @@ def read_stream(  # noqa: PLR0913
             if state.failure_state.error is not None:
                 return
             buffer.append(line)
-            if not catch_output:
+            if should_call_stream_callback(catch_output, callback):
                 callback(line)
         except Exception as error:  # noqa: BLE001
             if state.failure_state.set(error):
                 state.wake_event.set()
             return
+
+
+def should_call_stream_callback(catch_output: bool, callback: StreamCallback) -> bool:
+    if not catch_output:
+        return True
+    return callback not in (stdout_with_flush, stderr_with_flush)
 
 
 def wait_for_process_exit_and_signal(process: Popen[str], state: _ExecutionState) -> None:

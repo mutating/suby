@@ -145,6 +145,21 @@ def test_catch_output_suppresses_console_output():
     assert result.stdout == 'hello, world!\n'
 
 
+def test_catch_output_keeps_custom_callbacks():
+    """catch_output=True suppresses default console forwarding without bypassing custom callbacks."""
+    collected = []
+    stderr_buffer = StringIO()
+    stdout_buffer = StringIO()
+
+    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+        result = run('python -c "print(\'hello, world!\')"', catch_output=True, stdout_callback=collected.append)
+
+    assert collected == ['hello, world!\n']
+    assert stdout_buffer.getvalue() == ''
+    assert stderr_buffer.getvalue() == ''
+    assert result.stdout == 'hello, world!\n'
+
+
 @pytest.mark.parametrize(
     ('command', 'run_kwargs', 'expected_info', 'expected_error'),
     [

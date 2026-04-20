@@ -235,14 +235,14 @@ run('python -c "print(\'hello, world!\')"', stdout_callback=my_new_stdout)
 # You can't see it here, but if you run this code yourself, the output in the console will be red!
 ```
 
-You can also completely disable the output by passing `True` as the `catch_output` parameter:
+You can also disable the default forwarding to the current process by passing `True` as the `catch_output` parameter:
 
 ```python
 run('python -c "print(\'hello, world!\')"', catch_output=True)
 # There's nothing here.
 ```
 
-If you specify `catch_output=True`, even if you have also defined custom callback functions, they will not be called. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the output, but it does not prevent the buffering of output.
+If you specify `catch_output=True`, the default `stdout` and `stderr` forwarding callbacks are suppressed, so subprocess output is not printed by `suby` automatically. Custom `stdout_callback` and `stderr_callback` functions are still called for each line. In addition, `suby` always returns [the result](#run-subprocess-and-look-at-the-result) of executing the command, containing the full output. The `catch_output` argument can suppress only the default console forwarding, but it does not prevent custom callback delivery or result buffering.
 
 <details>
   <summary>Notes about concurrent output</summary>

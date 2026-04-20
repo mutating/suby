@@ -246,8 +246,8 @@ def test_directory_composes_with_stream_callbacks(tmp_path):
     assert Path(stderr_lines[0].rstrip('\n')).resolve() == directory.resolve()
 
 
-def test_directory_with_catch_output_bypasses_stream_callbacks(tmp_path):
-    """catch_output=True keeps bypassing callbacks when directory is set."""
+def test_directory_with_catch_output_still_calls_stream_callbacks(tmp_path):
+    """catch_output=True captures output without bypassing custom callbacks when directory is set."""
     directory = tmp_path / 'work'
     directory.mkdir()
     stdout_lines = []
@@ -267,8 +267,8 @@ def test_directory_with_catch_output_bypasses_stream_callbacks(tmp_path):
     assert result.returncode == 0
     assert result.stdout == 'stdout from child\n'
     assert result.stderr == 'stderr from child\n'
-    assert stdout_lines == []
-    assert stderr_lines == []
+    assert stdout_lines == ['stdout from child\n']
+    assert stderr_lines == ['stderr from child\n']
 
 
 def test_directory_composes_with_logger(tmp_path):
