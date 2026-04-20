@@ -14,7 +14,7 @@ requires-python = ">=3.8"
 dependencies = [
     'emptylog>=0.0.12',
     'cantok>=0.0.36',
-    'microbenchmark>=0.0.2',
+    'microbenchmark>=0.0.3',
     'sigmatch>=0.0.9',
 ]
 classifiers = [
