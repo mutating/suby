@@ -55,6 +55,10 @@ plugins = ["coverage_pyver_pragma"]
 source = ["suby"]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: tests that create isolated environments, install dependencies, or otherwise take noticeably longer",
+]
 norecursedirs = ["build", "mutants"]
 testpaths = ["tests/documentation", "tests/typing", "tests/units"]
 
