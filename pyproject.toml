@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==68.0.0"]
-build-backend = "setuptools.build_meta"
+requires = ["flit_core==3.12.0"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "suby"
-version = "0.0.8"
+version = "0.0.9"
 authors = [
   { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
 ]
@@ -45,10 +45,6 @@ keywords = [
     'execute commands',
 ]
 
-[tool.setuptools]
-package-data = { suby = ["py.typed"] }
-packages = { find = { include = ["suby"] } }
-
 [tool.mutmut]
 paths_to_mutate=["suby"]
 
@@ -59,6 +55,10 @@ plugins = ["coverage_pyver_pragma"]
 source = ["suby"]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: tests that create isolated environments, install dependencies, or otherwise take noticeably longer",
+]
 norecursedirs = ["build", "mutants"]
 testpaths = ["tests/documentation", "tests/typing", "tests/units"]
 
