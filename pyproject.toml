@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "suby"
-version = "0.0.8"
+version = "0.0.9"
 authors = [
   { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
 ]
