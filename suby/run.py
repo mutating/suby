@@ -36,11 +36,11 @@ from typing import (
 from cantok import (
     AbstractToken,
     CancellationError,
+    ConditionCancellationError as CantokConditionCancellationError,
     DefaultToken,
+    TimeoutCancellationError as CantokTimeoutCancellationError,
     TimeoutToken,
 )
-from cantok import ConditionCancellationError as CantokConditionCancellationError
-from cantok import TimeoutCancellationError as CantokTimeoutCancellationError
 from emptylog import EmptyLogger, LoggerProtocol
 from sigmatch import PossibleCallMatcher, SignatureMismatchError
 

@@ -1,10 +1,10 @@
-from suby.errors import ConditionCancellationError as ConditionCancellationError
 from suby.errors import (
+    ConditionCancellationError as ConditionCancellationError,
     EnvironmentVariablesConflict as EnvironmentVariablesConflict,
+    RunningCommandError as RunningCommandError,
+    TimeoutCancellationError as TimeoutCancellationError,
+    WrongCommandError as WrongCommandError,
+    WrongDirectoryError as WrongDirectoryError,
 )
-from suby.errors import RunningCommandError as RunningCommandError
-from suby.errors import TimeoutCancellationError as TimeoutCancellationError
-from suby.errors import WrongCommandError as WrongCommandError
-from suby.errors import WrongDirectoryError as WrongDirectoryError
 from suby.run import run as run
 from suby.subprocess_result import SubprocessResult as SubprocessResult
