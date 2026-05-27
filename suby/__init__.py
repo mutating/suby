@@ -7,3 +7,4 @@ from suby.errors import TimeoutCancellationError as TimeoutCancellationError
 from suby.errors import WrongCommandError as WrongCommandError
 from suby.errors import WrongDirectoryError as WrongDirectoryError
 from suby.run import run as run
+from suby.subprocess_result import SubprocessResult as SubprocessResult
