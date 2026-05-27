@@ -1,8 +1,7 @@
 import re
 import sys
 
-from suby import run
-from suby.subprocess_result import SubprocessResult
+from suby import SubprocessResult, run
 
 
 def test_generated_id_has_expected_shape_and_is_unique():
