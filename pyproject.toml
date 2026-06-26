@@ -1,16 +1,16 @@
 [build-system]
-requires = ["flit_core==3.12.0"]
-build-backend = "flit_core.buildapi"
+requires = ['flit_core==3.12.0']
+build-backend = 'flit_core.buildapi'
 
 [project]
-name = "suby"
-version = "0.0.11"
+name = 'suby'
+version = '0.0.11'
 authors = [
-  { name="Evgeniy Blinov", email="zheni-b@yandex.ru" },
+  { name='Evgeniy Blinov', email='zheni-b@yandex.ru' },
 ]
 description = 'Slightly simplified subprocesses'
-readme = "README.md"
-requires-python = ">=3.8"
+readme = 'README.md'
+requires-python = '>=3.8'
 dependencies = [
     'emptylog>=0.0.12',
     'cantok>=0.0.38',
@@ -18,7 +18,7 @@ dependencies = [
     'sigmatch>=0.0.10',
 ]
 classifiers = [
-    "Operating System :: OS Independent",
+    'Operating System :: OS Independent',
     'Operating System :: MacOS :: MacOS X',
     'Operating System :: Microsoft :: Windows',
     'Operating System :: POSIX',
@@ -46,28 +46,28 @@ keywords = [
 ]
 
 [tool.mutmut]
-paths_to_mutate=["suby"]
+paths_to_mutate=['suby']
 
 [tool.coverage.run]
 branch = true
 parallel = true
-plugins = ["coverage_pyver_pragma"]
-source = ["suby"]
+plugins = ['coverage_pyver_pragma']
+source = ['suby']
 
 [tool.pytest.ini_options]
-addopts = "-m 'not slow'"
+addopts = '-m "not slow"'
 markers = [
-    "slow: tests that create isolated environments, install dependencies, or otherwise take noticeably longer",
+    'slow: tests that create isolated environments, install dependencies, or otherwise take noticeably longer',
 ]
-norecursedirs = ["build", "mutants"]
-testpaths = ["tests/documentation", "tests/typing", "tests/units"]
+norecursedirs = ['build', 'mutants']
+testpaths = ['tests/documentation', 'tests/typing', 'tests/units']
 
 [tool.ruff]
 lint.ignore = ['E501', 'E712', 'PTH123', 'PTH118', 'PLR2004', 'PTH107', 'SIM105', 'SIM102', 'RET503', 'PLR0912', 'C901', 'E731', 'F821']
-lint.select = ["ERA001", "YTT", "ASYNC", "BLE", "B", "A", "COM", "INP", "PIE", "T20", "PT", "RSE", "RET", "SIM", "SLOT", "TID252", "ARG", "PTH", "I", "C90", "N", "E", "W", "D201", "D202", "D419", "F", "PL", "PLE", "PLR", "PLW", "RUF", "TRY201", "TRY400", "TRY401"]
+lint.select = ['ERA001', 'YTT', 'ASYNC', 'BLE', 'B', 'A', 'COM', 'INP', 'PIE', 'T20', 'PT', 'RSE', 'RET', 'SIM', 'SLOT', 'TID252', 'ARG', 'PTH', 'I', 'C90', 'N', 'E', 'W', 'D201', 'D202', 'D419', 'F', 'PL', 'PLE', 'PLR', 'PLW', 'RUF', 'TRY201', 'TRY400', 'TRY401']
 lint.isort.combine-as-imports = true
 lint.isort.force-single-line = false
-format.quote-style = "single"
+format.quote-style = 'single'
 
 [project.urls]
 'Source' = 'https://github.com/mutating/suby'
