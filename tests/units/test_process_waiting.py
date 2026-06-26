@@ -15,10 +15,7 @@ import pytest
 from cantok import ConditionToken, SimpleToken, TimeoutCancellationError
 
 from suby import process_waiting, run
-from suby.process_waiting import (
-    has_event_driven_wait,
-    wait_for_process_exit,
-)
+from suby.process_waiting import has_event_driven_wait, wait_for_process_exit
 from suby.subprocess_result import SubprocessResult
 
 _run_module = importlib.import_module('suby.run')
