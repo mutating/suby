@@ -12,7 +12,7 @@ from functools import partial
 from io import StringIO
 from os import environ
 from pathlib import Path, PurePath
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from time import perf_counter
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, List, cast
@@ -385,28 +385,55 @@ def test_condition_token_cancellation_returns_or_raises_killed_result_according_
 
 
 @pytest.mark.parametrize(
-    ('command', 'run_timeout', 'expected_exception', 'expected_token_identity'),
+    ('command', 'run_timeout', 'condition_timeout', 'observed_time', 'expected_exception', 'expected_token_identity'),
     [
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 3, ConditionCancellationError, True),
-        (('python -c "import time; time.sleep({sleep_time})"',), 3, ConditionCancellationError, True),
-        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 0.05, TimeoutCancellationError, False),
-        (('python -c "import time; time.sleep({sleep_time})"',), 0.05, TimeoutCancellationError, False),
+        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 3, 0.1, 0.2, ConditionCancellationError, True),
+        (('python -c "import time; time.sleep({sleep_time})"',), 3, 0.1, 0.2, ConditionCancellationError, True),
+        ((sys.executable, '-c "import time; time.sleep({sleep_time})"'), 0.05, 0.1, 0.06, TimeoutCancellationError, False),
+        (('python -c "import time; time.sleep({sleep_time})"',), 0.05, 0.1, 0.06, TimeoutCancellationError, False),
     ],
 )
 def test_token_plus_timeout_without_catching_raises_expected_cancellation(
     command,
     run_timeout,
+    condition_timeout,
+    observed_time,
     expected_exception,
     expected_token_identity,
+    monkeypatch,
     assert_no_suby_thread_leaks,
 ):
-    """When token and timeout are both configured, the earlier cancellation source determines which exception is raised."""
+    """When token and timeout are both configured, the earlier cancellation source determines which exception is raised.
+
+    This intentionally patches time.perf_counter because the unpatched version would depend on a narrow real-time
+    window: timeout must become active after 0.05 seconds while ConditionToken must still be inactive until 0.1 seconds.
+    Slow or differently scheduled runtimes, especially free-threaded Python under xdist and coverage, can miss that
+    window and make both tokens active before the first observed cancellation.
+
+    Patching global clocks should be justified because it can affect unrelated code in the same test process. Here the
+    patch is scoped by monkeypatch, the test keeps its own elapsed-time measurement on the already imported real
+    perf_counter, and cantok's TimeoutToken intentionally reads time.perf_counter through the time module. This keeps the
+    production path intact: run() still creates a real TimeoutToken, but the token sees a deterministic start time and
+    then a deterministic observation time. That lets the test assert the cancellation source selected by the token
+    composition without making CI timing part of the contract.
+    """
     sleep_time = 100000
-    timeout = 0.1
     command = [subcommand.format(sleep_time=sleep_time) if isinstance(subcommand, str) else subcommand for subcommand in command]
 
+    timer_state = SimpleNamespace(calls=0)
+    timer_lock = Lock()
+
+    def controlled_perf_counter():
+        with timer_lock:
+            timer_state.calls += 1
+            if timer_state.calls == 1:
+                return 0.0
+        return observed_time
+
+    monkeypatch.setattr(time, 'perf_counter', controlled_perf_counter)
+
     start_time = perf_counter()
-    token = ConditionToken(lambda: perf_counter() - start_time > timeout)
+    token = ConditionToken(lambda: observed_time > condition_timeout)
 
     with assert_no_suby_thread_leaks(), pytest.raises(expected_exception) as exc_info:
         run(*command, token=token, timeout=run_timeout)
@@ -418,13 +445,17 @@ def test_token_plus_timeout_without_catching_raises_expected_cancellation(
     result = exc_info.value.result
 
     end_time = perf_counter()
+    assert timer_state.calls >= 1
 
     assert result.returncode != 0
     assert result.stdout == ''
     assert result.stderr == ''
     assert result.killed_by_token == True
 
-    assert end_time - start_time >= min(timeout, run_timeout)
+    if expected_exception is ConditionCancellationError:
+        assert condition_timeout < observed_time < run_timeout
+    else:
+        assert run_timeout < observed_time < condition_timeout
     assert end_time - start_time < sleep_time
 
 
