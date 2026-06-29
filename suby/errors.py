@@ -1,5 +1,7 @@
-from cantok import ConditionCancellationError as CantokConditionCancellationError
-from cantok import TimeoutCancellationError as CantokTimeoutCancellationError
+from cantok import (
+    ConditionCancellationError as CantokConditionCancellationError,
+    TimeoutCancellationError as CantokTimeoutCancellationError,
+)
 
 from suby.subprocess_result import SubprocessResult
 

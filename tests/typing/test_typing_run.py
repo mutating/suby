@@ -18,8 +18,6 @@ from suby import (
 )
 from suby.errors import (
     EnvironmentVariablesConflict as ModuleEnvironmentVariablesConflict,
-)
-from suby.errors import (
     WrongDirectoryError as ModuleWrongDirectoryError,
 )
 from suby.subprocess_result import SubprocessResult
