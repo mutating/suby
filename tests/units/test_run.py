@@ -393,7 +393,7 @@ def test_condition_token_cancellation_returns_or_raises_killed_result_according_
         (('python -c "import time; time.sleep({sleep_time})"',), 0.05, 0.1, 0.06, TimeoutCancellationError, False),
     ],
 )
-def test_token_plus_timeout_without_catching_raises_expected_cancellation(
+def test_token_plus_timeout_without_catching_raises_expected_cancellation(  # noqa: PLR0913
     command,
     run_timeout,
     condition_timeout,
