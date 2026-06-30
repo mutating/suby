@@ -24,4 +24,9 @@ SCENARIOS = [
 @pytest.mark.benchmark
 @pytest.mark.parametrize('scenario', SCENARIOS, ids=[scenario.name for scenario in SCENARIOS])
 def test_benchmark_scenario(benchmark, scenario):
+    """
+    Benchmark each scenario from `SCENARIOS` with the benchmark fixture.
+
+    Passing `scenario._call_once` avoids timing `Scenario.run()`'s own iteration loop inside the fixture's repetition.
+    """
     benchmark(scenario._call_once)

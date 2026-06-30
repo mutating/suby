@@ -45,22 +45,30 @@ def run_once(scenario: Scenario) -> None:
 
 
 def test_benchmarks_are_grouped_scenarios():
+    """Verify `SCENARIOS` contains `Scenario` objects and `benchmarks.all` is the ordered `ScenarioGroup` of exactly those scenarios."""
     assert all(isinstance(scenario, Scenario) for scenario in SCENARIOS)
     assert isinstance(benchmarks.all, ScenarioGroup)
     assert benchmarks.all._scenarios == SCENARIOS
 
 
 def test_benchmark_names_match_variable_names():
+    """Ensure each scenario's `name` matches the `benchmarks` attribute bound to that same object."""
     for scenario in SCENARIOS:
         assert getattr(benchmarks, scenario.name) is scenario
 
 
 def test_benchmark_docs_are_present():
+    """Every scenario in `SCENARIOS` has a non-empty `scenario.doc` value."""
     for scenario in SCENARIOS:
         assert scenario.doc
 
 
 def test_benchmark_iteration_counts():
+    """
+    Pin `Scenario.number` for every benchmark scenario.
+
+    Most scenarios use `benchmarks.ITERATIONS`, while `short_sleep`, `cancelled_token_before_start`, and `condition_token_cancel_after_start` stay capped at 20 to keep the suite practical.
+    """
     for scenario in SCENARIOS:
         if scenario in (
             benchmarks.short_sleep,
@@ -73,11 +81,20 @@ def test_benchmark_iteration_counts():
 
 
 def test_all_benchmarks_run_once():
+    """Smoke-test that every scenario in `SCENARIOS` is executable.
+
+    Each scenario is cloned with `number=1` so the real run path is covered without turning this unit test into a performance benchmark.
+    """
     for scenario in SCENARIOS:
         run_once(scenario)
 
 
 def test_output_benchmarks_do_not_write_to_console(capsys):
+    """
+    Ensure scenarios from `OUTPUT_SCENARIOS` do not forward stdout or stderr to the console.
+
+    The test runs one-iteration clones and asserts pytest captured no stdout or stderr.
+    """
     for scenario in OUTPUT_SCENARIOS:
         run_once(scenario)
 
@@ -88,6 +105,10 @@ def test_output_benchmarks_do_not_write_to_console(capsys):
 
 
 def test_benchmarks_use_run_directly():
+    """Ensure normal benchmark `Scenario.function` values point to `suby.run` directly.
+
+    Scenario-specific behavior should live in args/kwargs; only `condition_token_cancel_after_start` may use a helper to cancel after subprocess startup.
+    """
     for scenario in SCENARIOS:
         function = scenario.function
 
@@ -98,6 +119,11 @@ def test_benchmarks_use_run_directly():
 
 
 def test_key_benchmark_arguments():
+    """
+    Lock down declared arguments for key benchmark scenarios.
+
+    This verifies command forms, output capture, token kwargs, and the delayed-cancellation scenario's lack of static arguments.
+    """
     assert benchmarks.simple_success._arguments.args == (benchmarks.PYTHON, '-c', 'pass')
     assert benchmarks.python_version_output._arguments.args == (benchmarks.PYTHON, '-VV')
     assert benchmarks.python_version_output._arguments.kwargs == {'catch_output': True}
@@ -132,6 +158,11 @@ def test_key_benchmark_arguments():
 
 
 def test_delayed_condition_token_cancellation_timer_starts_after_subprocess_marker(monkeypatch):
+    """
+    Verify delayed token cancellation is based on subprocess-start marker age.
+
+    A fake `run` observes the token before marker creation, shortly after marker creation, and after the 10 ms cancellation delay.
+    """
     observed_states = []
 
     def fake_run(*arguments, **kwargs):
