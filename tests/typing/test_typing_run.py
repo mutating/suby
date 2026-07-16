@@ -355,8 +355,8 @@ def test_run_rejects_invalid_token_objects() -> None:
 
 
 @pytest.mark.mypy_testing
-def test_run_result_and_result_fields_have_expected_types() -> None:
-    """run() returns SubprocessResult, and its fields keep their Optional/boolean static types."""
+def test_run_result_and_its_attributes_have_expected_types() -> None:
+    """run() returns SubprocessResult; stdout, stderr, and returncode are Optional, while killed_by_token and success are bool."""
     result = run('python -c pass')
 
     reveal_type(result)  # R: suby.subprocess_result.SubprocessResult
@@ -364,12 +364,14 @@ def test_run_result_and_result_fields_have_expected_types() -> None:
     reveal_type(result.stderr)  # R: Union[builtins.str, None]
     reveal_type(result.returncode)  # R: Union[builtins.int, None]
     reveal_type(result.killed_by_token)  # R: builtins.bool
+    reveal_type(result.success)  # R: builtins.bool
 
     _explicit_result: SubprocessResult = run('python -c pass')
     _optional_stdout: Optional[str] = result.stdout
     _optional_stderr: Optional[str] = result.stderr
     _optional_returncode: Optional[int] = result.returncode
     _killed_by_token: bool = result.killed_by_token
+    _success: bool = result.success
 
     if result.stdout is not None:
         result.stdout.upper()

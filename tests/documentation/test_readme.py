@@ -33,8 +33,8 @@ def _read_child_environment(*names: str, **run_kwargs):
     return json.loads(result.stdout)
 
 
-def test_run_hello_world_and_result_repr_format():
-    """The hello-world command is echoed to stdout, captured in result.stdout, and keeps the documented SubprocessResult repr format."""
+def test_run_hello_world_and_result_contract():
+    """The README hello-world call forwards child output to stdout and captures it in result.stdout. The result reports success and retains the documented repr."""
     stderr_buffer = StringIO()
     stdout_buffer = StringIO()
 
@@ -48,6 +48,7 @@ def test_run_hello_world_and_result_repr_format():
     assert result.stderr == ''
     assert result.returncode == 0
     assert not result.killed_by_token
+    assert result.success is True
 
     assert re.fullmatch(
         r"SubprocessResult\(id='[0-9a-f]{32}', stdout='hello, world!\\n', stderr='', returncode=0, killed_by_token=False\)",
