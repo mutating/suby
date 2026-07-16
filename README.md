@@ -79,12 +79,13 @@ print(result)
 #> SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
 ```
 
-It returns an object of the `SubprocessResult` class, which contains the following fields:
+It returns an object of the `SubprocessResult` class, which contains the following public attributes:
 
 - **id**: a unique string that allows you to distinguish one result of calling the same command from another.
 - **stdout**: a string containing the entire output of the command being run.
 - **stderr**: a string containing the entire stderr output of the command being run. If the subprocess fails to start at all, this field remains empty because no process stderr existed yet.
 - **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
+- **success**: a read-only boolean property that is `True` exactly when `returncode == 0`.
 - **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
 
 

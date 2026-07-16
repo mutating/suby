@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 
 from microbenchmark import Scenario, ScenarioGroup
@@ -161,32 +160,44 @@ def test_delayed_condition_token_cancellation_timer_starts_after_subprocess_mark
     """
     Verify delayed token cancellation is based on subprocess-start marker age.
 
-    A fake `run` observes the token before marker creation, shortly after marker creation, and after the 10 ms cancellation delay.
+    A fake `run` observes repeated pre-marker polls, a post-marker poll before 10 ms, and cancellation exactly at the 10 ms boundary.
     """
-    observed_states = []
+    marker_file = None
+    pre_marker_time_reads = 0
+    times = iter(())
+
+    def fake_time_ns():
+        nonlocal pre_marker_time_reads
+
+        if marker_file is None or not marker_file.exists():
+            pre_marker_time_reads += 1
+            return 0
+        return next(times)
 
     def fake_run(*arguments, **kwargs):
+        nonlocal marker_file, times
+
         token = kwargs['token']
         marker_file = arguments[-1]
 
-        time.sleep(0.02)
-        observed_states.append(bool(token))
+        assert bool(token) is True
+        assert bool(token) is True
 
         marker_file.touch()
         marker_mtime_ns = marker_file.stat().st_mtime_ns
         times = iter(
             (
-                marker_mtime_ns + 1_000_000,
-                marker_mtime_ns + 20_000_000,
+                marker_mtime_ns + 9_999_999,
+                marker_mtime_ns + 10_000_000,
             ),
         )
-        monkeypatch.setattr(benchmarks, 'time_ns', lambda: next(times))
 
-        observed_states.append(bool(token))
-        observed_states.append(bool(token))
+        assert bool(token) is True
+        assert bool(token) is False
 
     monkeypatch.setattr(benchmarks, 'run', fake_run)
+    monkeypatch.setattr(benchmarks, 'time_ns', fake_time_ns)
 
     benchmarks.run_with_delayed_condition_token_cancellation()
 
-    assert observed_states == [True, True, False]
+    assert pre_marker_time_reads == 0
