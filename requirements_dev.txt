@@ -3,7 +3,8 @@ pytest-codspeed==2.2.1; python_version < '3.9'
 pytest-codspeed==4.3.0; python_version >= '3.9'
 pytest-xdist==3.6.1; python_version < '3.9'
 pytest-xdist==3.8.0; python_version >= '3.9'
-coverage==7.6.1
+coverage==7.6.1; python_version < '3.15'
+coverage==7.15.2; python_version >= '3.15'
 coverage-pyver-pragma==0.4.0
 build==1.2.2.post1
 mypy==1.14.1
