@@ -76,7 +76,7 @@ Let's try to call it:
 ```python
 result = run('python -c "print(\'hello, world!\')"')
 print(result)
-#> SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False)
+#> SubprocessResult(id='e9f2d29acb4011ee8957320319d7541c', stdout='hello, world!\n', stderr='', returncode=0, killed_by_token=False, start_time=datetime.datetime(2024, 2, 22, 2, 15, 8, 190000, tzinfo=datetime.timezone.utc), duration=datetime.timedelta(microseconds=24567))
 ```
 
 It returns an object of the `SubprocessResult` class, which contains the following public attributes:
@@ -87,6 +87,21 @@ It returns an object of the `SubprocessResult` class, which contains the followi
 - **returncode**: an integer indicating the return code of the subprocess. `0` means that the process was completed successfully; other values usually indicate an error.
 - **success**: a read-only boolean property that is `True` exactly when `returncode == 0`.
 - **killed_by_token**: a boolean flag indicating whether the subprocess was killed due to [token](https://cantok.readthedocs.io/en/latest/the_pattern/) cancellation.
+- **start_time**: a timezone-aware UTC `datetime` sampled immediately before process creation and published after `Popen` succeeds.
+- **duration**: a `timedelta` measured with a monotonic clock from immediately before `Popen` until process completion is observed and, if needed, an attempt has been made to finalize its return code. It includes the time spent creating the process.
+
+<details>
+  <summary>Timing field contract</summary>
+
+The timing fields have three possible states for results created by `suby`:
+
+1. `start_time is None` and `duration is None`: the `Popen` call failed before a process object became available to `suby`.
+2. `start_time` is set and `duration is None`: the process was created, but `suby` did not measure its completion.
+3. Both fields are set: process completion was measured.
+
+`suby` never sets `duration` without `start_time`.
+
+</details>
 
 
 ## Command parsing
@@ -329,7 +344,7 @@ You can prevent `suby` from raising these exceptions. To do this, set the `catch
 ```python
 result = run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True)
 print(result)
-#> SubprocessResult(id='c9125b90d03111ee9660320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='c9125b90d03111ee9660320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True, start_time=datetime.datetime(2024, 2, 22, 2, 20, tzinfo=datetime.timezone.utc), duration=datetime.timedelta(seconds=1, microseconds=1234))
 ```
 
 Keep in mind that the full result of the subprocess call can also be found through the `result` attribute of any exception raised by `suby`:
@@ -341,7 +356,7 @@ try:
     run('python -c "import time; time.sleep(10_000)"', timeout=1)
 except TimeoutCancellationError as e:
     print(e.result)
-    #> SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+    #> SubprocessResult(id='a80dc26cd03211eea347320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True, start_time=datetime.datetime(2024, 2, 22, 2, 20, tzinfo=datetime.timezone.utc), duration=datetime.timedelta(seconds=1, microseconds=1234))
 ```
 
 `catch_exceptions=True` applies to the four subprocess-related cases above. Invalid [directory](#changing-directories) values still raise their validation exceptions before a subprocess is started.
@@ -388,7 +403,7 @@ However, if you pass the `catch_exceptions=True` argument, the exception will no
 ```python
 token = ConditionToken(lambda: randint(1, 1000) == 7)
 print(run('python -c "import time; time.sleep(10_000)"', token=token, catch_exceptions=True))
-#> SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='e92ccd54d24b11ee8376320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True, start_time=datetime.datetime(2024, 2, 22, 2, 25, tzinfo=datetime.timezone.utc), duration=datetime.timedelta(seconds=3, microseconds=4567))
 ```
 
 Under the hood, token state is checked while `stdout` and `stderr` are being read. When the token is canceled, the subprocess is killed.
@@ -422,5 +437,5 @@ Just as with [regular cancellation tokens](#working-with-cancellation-tokens), y
 
 ```python
 print(run('python -c "import time; time.sleep(10_000)"', timeout=1, catch_exceptions=True))
-#> SubprocessResult(id='ea88c518d25011eeb25e320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True)
+#> SubprocessResult(id='ea88c518d25011eeb25e320319d7541c', stdout='', stderr='', returncode=-9, killed_by_token=True, start_time=datetime.datetime(2024, 2, 22, 2, 30, tzinfo=datetime.timezone.utc), duration=datetime.timedelta(seconds=1, microseconds=1234))
 ```
